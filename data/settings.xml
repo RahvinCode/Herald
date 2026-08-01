@@ -3,6 +3,7 @@
     <global>
         <debug_mode>true</debug_mode>
         <delay>4</delay>
+        <track_cure>true</track_cure>
         <track_cursna>true</track_cursna>
         <track_phalanx>true</track_phalanx>
         <track_protect_shell>true</track_protect_shell>
