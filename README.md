@@ -44,6 +44,8 @@ local equip_reset_command = "gs c update auto"
 3. Drop the `Herald.lua` script inside that folder.
 4. Open your game client and load the addon via the chat console:  
    `//lua load herald`
+5. Add or modify your existing gearswap buff and cure received sets, or use the default set names listed above.
+6. Change the equip_reset_command variable to match the command your gearswap uses to trigger choosing a set.  This software was designed to work with gs c apdate auto, which is standard for Mirdain's ecosystem, but can be adapted to any.
 
 ---
 
