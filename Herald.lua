@@ -19,7 +19,7 @@ DEALINGS IN THE SOFTWARE.
 
 _addon.name = 'Herald'
 _addon.author = 'Rahvin'
-_addon.version = '1.1'
+_addon.version = '1.2'
 _addon.commands = { 'her', 'herald' }
 
 local packets = require('packets')
@@ -44,172 +44,76 @@ local default_settings = {
     track_cure = true,
     track_protect_shell = true,
 }
-local settings = config.load(default_settings)
+local settings = {}
 
 local addon_enabled = true
-local in_progress = false
+local outgoing_cast_active = false
+local active_incoming_casters = {}
 local failsafe_active = false
 local failsafe_trigger_time = 0
 
-local tracked_spells = {
-    [20] = settings.track_cursna,         --Cursna
-    [106] = settings.track_phalanx,       --Phalanx
-    [107] = settings.track_phalanx,       --Phalanx II
-    [108] = settings.track_regen,         --Regen
-    [110] = settings.track_regen,         --Regen II
-    [111] = settings.track_regen,         --Regen III
-    [477] = settings.track_regen,         --Regen IV
-    [504] = settings.track_regen,         --Regen V
-    [43] = settings.track_protect_shell,  --Protect
-    [44] = settings.track_protect_shell,  --Protect II
-    [45] = settings.track_protect_shell,  --Protect III
-    [46] = settings.track_protect_shell,  --Protect IV
-    [47] = settings.track_protect_shell,  --Protect V
-    [125] = settings.track_protect_shell, --Protectra
-    [126] = settings.track_protect_shell, --Protectra II
-    [127] = settings.track_protect_shell, --Protectra III
-    [128] = settings.track_protect_shell, --Protectra IV
-    [129] = settings.track_protect_shell, --Protectra V
-    [48] = settings.track_protect_shell,  --Shell
-    [49] = settings.track_protect_shell,  --Shell II
-    [50] = settings.track_protect_shell,  --Shell III
-    [51] = settings.track_protect_shell,  --Shell IV
-    [52] = settings.track_protect_shell,  --Shell V
-    [130] = settings.track_protect_shell, --Shellra
-    [131] = settings.track_protect_shell, --Shellra II
-    [132] = settings.track_protect_shell, --Shellra III
-    [133] = settings.track_protect_shell, --Shellra IV
-    [134] = settings.track_protect_shell, --Shellra V
-    [1] = settings.track_cure,            --Cure
-    [2] = settings.track_cure,            --Cure II
-    [3] = settings.track_cure,            --Cure III
-    [4] = settings.track_cure,            --Cure IV
-    [5] = settings.track_cure,            --Cure V
-    [6] = settings.track_cure,            --Cure VI
-    [7] = settings.track_cure,            --Curaga
-    [8] = settings.track_cure,            --Curaga II
-    [9] = settings.track_cure,            --Curaga III
-    [10] = settings.track_cure,           --Curaga IV
-    [11] = settings.track_cure,           --Curaga V
-    [93] = settings.track_cure,           --Cura
-    [474] = settings.track_cure,          --Cura II
-    [475] = settings.track_cure,          --Cura III
+-- Consolidated spell definitions using metadata to dictate categories and AoE rules
+local spell_info = {
+    -- Cursna
+    [20] = { category = 'track_cursna', equip = cursna_set, aoe = false, majesty = false },
+    -- Phalanx
+    [106] = { category = 'track_phalanx', equip = phalanx_set, aoe = false, majesty = false },
+    [107] = { category = 'track_phalanx', equip = phalanx_set, aoe = false, majesty = false },
+    -- Regen
+    [108] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
+    [110] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
+    [111] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
+    [477] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
+    [504] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
+    -- Protect (Majesty affected)
+    [43] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
+    [44] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
+    [45] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
+    [46] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
+    [47] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
+    [125] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
+    [126] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
+    [127] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
+    [128] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
+    [129] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
+    -- Shell
+    [48] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
+    [49] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
+    [50] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
+    [51] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
+    [52] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
+    [130] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
+    [131] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
+    [132] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
+    [133] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
+    [134] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
+    -- Cure
+    [1] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
+    [2] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
+    [3] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
+    [4] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
+    [5] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
+    [6] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
+    -- Curaga / Cura
+    [7] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
+    [8] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
+    [9] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
+    [10] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
+    [11] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
+    [93] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
+    [474] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
+    [475] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
 }
 
-local tracked_abilities = {
-    [190] = settings.track_cure, --Curing Waltz
-    [191] = settings.track_cure, --Curing Waltz II
-    [192] = settings.track_cure, --Curing Waltz III
-    [193] = settings.track_cure, --Curing Waltz IV
-    [311] = settings.track_cure, --Curing Waltz V
-    [195] = settings.track_cure, --Divine Waltz
-    [262] = settings.track_cure, --Divine Waltz II
-}
-
-local cursna_spells = {
-    [20] = settings.track_cursna, --Cursna
-}
-
-local phalanx_spells = {
-    [106] = settings.track_phalanx, --Phalanx
-    [107] = settings.track_phalanx, --Phalanx II
-}
-
-local protect_spells = {
-    [43] = settings.track_protect_shell,  --Protect
-    [44] = settings.track_protect_shell,  --Protect II
-    [45] = settings.track_protect_shell,  --Protect III
-    [46] = settings.track_protect_shell,  --Protect IV
-    [47] = settings.track_protect_shell,  --Protect V
-    [125] = settings.track_protect_shell, --Protectra
-    [126] = settings.track_protect_shell, --Protectra II
-    [127] = settings.track_protect_shell, --Protectra III
-    [128] = settings.track_protect_shell, --Protectra IV
-    [129] = settings.track_protect_shell, --Protectra V
-}
-
-local protect_and_shell_spells = {
-    [43] = settings.track_protect_shell,  --Protect
-    [44] = settings.track_protect_shell,  --Protect II
-    [45] = settings.track_protect_shell,  --Protect III
-    [46] = settings.track_protect_shell,  --Protect IV
-    [47] = settings.track_protect_shell,  --Protect V
-    [125] = settings.track_protect_shell, --Protectra
-    [126] = settings.track_protect_shell, --Protectra II
-    [127] = settings.track_protect_shell, --Protectra III
-    [128] = settings.track_protect_shell, --Protectra IV
-    [129] = settings.track_protect_shell, --Protectra V
-    [48] = settings.track_protect_shell,  --Shell
-    [49] = settings.track_protect_shell,  --Shell II
-    [50] = settings.track_protect_shell,  --Shell III
-    [51] = settings.track_protect_shell,  --Shell IV
-    [52] = settings.track_protect_shell,  --Shell V
-    [130] = settings.track_protect_shell, --Shellra
-    [131] = settings.track_protect_shell, --Shellra II
-    [132] = settings.track_protect_shell, --Shellra III
-    [133] = settings.track_protect_shell, --Shellra IV
-    [134] = settings.track_protect_shell, --Shellra V
-}
-
-local regen_spells = {
-    [108] = settings.track_regen, --Regen
-    [110] = settings.track_regen, --Regen II
-    [111] = settings.track_regen, --Regen III
-    [477] = settings.track_regen, --Regen IV
-    [504] = settings.track_regen, --Regen V
-}
-
-local cure_spells = {
-    [1] = settings.track_cure,   --Cure
-    [2] = settings.track_cure,   --Cure II
-    [3] = settings.track_cure,   --Cure III
-    [4] = settings.track_cure,   --Cure IV
-    [5] = settings.track_cure,   --Cure V
-    [6] = settings.track_cure,   --Cure VI
-    [7] = settings.track_cure,   --Curaga
-    [8] = settings.track_cure,   --Curaga II
-    [9] = settings.track_cure,   --Curaga III
-    [10] = settings.track_cure,  --Curaga IV
-    [11] = settings.track_cure,  --Curaga V
-    [93] = settings.track_cure,  --Cura
-    [474] = settings.track_cure, --Cura II
-    [475] = settings.track_cure, --Cura III
-}
-
-local cure_abilities = {
-    [190] = settings.track_cure, --Curing Waltz
-    [191] = settings.track_cure, --Curing Waltz II
-    [192] = settings.track_cure, --Curing Waltz III
-    [193] = settings.track_cure, --Curing Waltz IV
-    [311] = settings.track_cure, --Curing Waltz V
-    [195] = settings.track_cure, --Divine Waltz
-    [262] = settings.track_cure, --Divine Waltz II
-}
-
-local aoe_spells = {
-    [125] = settings.track_protect_shell, --Protectra
-    [126] = settings.track_protect_shell, --Protectra II
-    [127] = settings.track_protect_shell, --Protectra III
-    [128] = settings.track_protect_shell, --Protectra IV
-    [129] = settings.track_protect_shell, --Protectra V
-    [130] = settings.track_protect_shell, --Shellra
-    [131] = settings.track_protect_shell, --Shellra II
-    [132] = settings.track_protect_shell, --Shellra III
-    [133] = settings.track_protect_shell, --Shellra IV
-    [134] = settings.track_protect_shell, --Shellra V
-    [7] = settings.track_cure,            --Curaga
-    [8] = settings.track_cure,            --Curaga II
-    [9] = settings.track_cure,            --Curaga III
-    [10] = settings.track_cure,           --Curaga IV
-    [11] = settings.track_cure,           --Curaga V
-    [93] = settings.track_cure,           --Cura
-    [474] = settings.track_cure,          --Cura II
-    [475] = settings.track_cure,          --Cura III
-}
-
-local aoe_abilities = {
-    [195] = settings.track_cure, --Divine Waltz
-    [262] = settings.track_cure, --Divine Waltz II
+-- Consolidated abilities mapping
+local ability_info = {
+    [190] = { category = 'track_cure', equip = cure_set, aoe = false },
+    [191] = { category = 'track_cure', equip = cure_set, aoe = false },
+    [192] = { category = 'track_cure', equip = cure_set, aoe = false },
+    [193] = { category = 'track_cure', equip = cure_set, aoe = false },
+    [311] = { category = 'track_cure', equip = cure_set, aoe = false },
+    [195] = { category = 'track_cure', equip = cure_set, aoe = true },
+    [262] = { category = 'track_cure', equip = cure_set, aoe = true },
 }
 
 
@@ -219,38 +123,36 @@ end
 
 local function debug(message, color_id)
     if not settings.debug_mode then return end
-
     local timestamp = math.floor(os.clock() * 1000)
     windower.add_to_chat(color_id or 204, "[Herald] [Time: " .. timestamp .. "] DEBUG: " .. message)
 end
 
-local function equip_gear(spell_i)
-    debug("Equip Gear Function Initiated with Spell ID " .. spell_i)
-    if cursna_spells[spell_i] then
-        debug("Sending Cursna Equip Command")
-        windower.send_command("gs equip " .. cursna_set)
-    elseif phalanx_spells[spell_i] then
-        debug("Sending Phalanx Equip Command")
-        windower.send_command("gs equip " .. phalanx_set)
-    elseif protect_and_shell_spells[spell_i] then
-        debug("Sending Prot/Shell Equip Command")
-        windower.send_command("gs equip " .. protect_shell_set)
-    elseif regen_spells[spell_i] then
-        debug("Sending Regen Equip Command")
-        windower.send_command("gs equip " .. regen_set)
+local function equip_gear(spell_id)
+    local info = spell_info[spell_id]
+    if info then
+        debug("Sending Equip Command: " .. info.equip)
+        windower.send_command("gs equip " .. info.equip)
     end
 end
 
-local function equip_gear_ability(ability_i)
-    debug("Equip Gear Function Initiated with Ability ID " .. ability_i)
-    if cure_abilities[ability_i] then
-        debug("Sending Cure Equip Command")
-        windower.send_command("gs equip " .. cure_set)
+local function equip_gear_ability(ability_id)
+    local info = ability_info[ability_id]
+    if info then
+        debug("Sending Equip Command: " .. info.equip)
+        windower.send_command("gs equip " .. info.equip)
     end
 end
 
-windower.register_event('load', function()
-    log_echo('Herald Loaded Successfully and Tracking Enabled', 204)
+local function count_keys(tbl)
+    local count = 0
+    for _ in pairs(tbl) do
+        count = count + 1
+    end
+    return count
+end
+
+local function load_character_settings()
+    settings = config.load(default_settings, 'global')
     log_echo('Tracked Spells: Cure/Waltz ' .. (settings.track_cure and "ON" or "OFF") .. ' | Cursna ' ..
         (settings.track_cursna and "ON" or "OFF") ..
         ' | Phalanx ' ..
@@ -259,7 +161,36 @@ windower.register_event('load', function()
         (settings.track_regen and "ON" or "OFF") .. ' | Protect ' .. (settings.track_protect_shell and "ON" or "OFF"))
     log_echo("Failsafe equipment reversion delay is " ..
         tostring(settings.delay) .. "s and debug mode is " .. (settings.debug_mode and "ON" or "OFF"))
+end
+
+local function set_random_seeds()
+    --Initialize a random seed that's player specific to avoid config save race condition
+    local player = windower.ffxi.get_player()
+    local char_seed = player and player.id or os.time()
+
+    -- Combine system time, fractional processor clock, and the player ID
+    math.randomseed(os.time() + math.floor(os.clock() * 1000) + char_seed)
+
+    -- Pop a few initial random numbers to flush out early seeding patterns
+    debug("Random 1 " .. math.random())
+    debug("Random 2 " .. math.random())
+    debug("Random 3 " .. math.random())
+end
+
+windower.register_event('load', function()
+    log_echo('Herald Loaded Successfully and Tracking Enabled', 204)
     log_echo("Options: //her [help|on|off|debug|cursna|phalanx|regen|protect|delay <seconds>]")
+
+    --Initialize character specific settings
+    load_character_settings()
+    set_random_seeds()
+end)
+
+windower.register_event('login', function()
+    --Initialize character specific settings
+    load_character_settings()
+    set_random_seeds()
+    debug("Character changed. Profile settings reloaded.")
 end)
 
 windower.register_event('outgoing chunk', function(id, data, modified, injected, blocked)
@@ -276,8 +207,8 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
             local spell_id = packet['Param'] -- The ID of the spell being cast
             debug('Outgoing Spell ID is ' .. spell_id)
 
-            --Check if spell is currently being tracked and continue to equipment changing if so
-            if tracked_spells[spell_id] then
+            local s_info = spell_info[spell_id]
+            if s_info and settings[s_info.category] then
                 debug('Outgoing Spell ID is tracked. Continuing to messaging.')
 
                 --Extract Target and Spell Data from the packet.
@@ -311,7 +242,7 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                     end
                 end
 
-                if aoe_spells[spell_id] or accession_active or (majesty_active and (cure_spells[spell_id] or protect_spells[spell_id])) then
+                if s_info.aoe or accession_active or (majesty_active and s_info.majesty) then
                     debug("AoE Spell Cast Detected.  Calculating targets.")
 
                     local party = windower.ffxi.get_party()
@@ -322,31 +253,21 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                     local threshold_squared = max_distance * max_distance
 
                     for slot, member in pairs(party) do
-                        -- Ensure the slot contains a valid party member table with a name
                         if type(member) == 'table' and member.name then
-                            -- Get the full mob table for this specific party member to fetch coordinates
                             local member_mob = windower.ffxi.get_mob_by_name(member.name)
-
                             if member_mob then
-                                -- Calculate spatial deltas between the party member and the spell target
                                 local dx = member_mob.x - target_mob.x
                                 local dy = member_mob.y - target_mob.y
                                 local dz = member_mob.z - target_mob.z
-
-                                -- Compute 3D Euclidean distance squared
                                 local distance_squared = (dx * dx) + (dy * dy) + (dz * dz)
 
-                                -- Compare directly against the squared threshold
                                 if distance_squared <= threshold_squared then
                                     debug(member.name .. " is WITHIN 10 yalms of " .. target_mob.name)
                                     table.insert(nearby_members, member.name)
-
-                                    -- TODO: Pack this player into an IPC broadcast table
                                 else
                                     debug(member.name .. " is OUT of range.")
                                 end
                             else
-                                -- The party member is out of zone or beyond local draw distance limits
                                 debug(member.name .. " data unavailable (Too far away).")
                             end
                         end
@@ -357,39 +278,36 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                     end
                 end
 
-                --Send IPC Message to others indicating target, spell name and send time.
-                local msg = string.format("HERALD|%s|%s", target_name, spell_data.id)
+                --Send IPC Message to others indicating sender, target, and spell name.
+                local msg = string.format("HERALD|%s|%s|%s", player.name, target_name, spell_data.id)
                 debug("IPC Message Sent: " .. msg)
                 windower.send_ipc_message(msg)
-                in_progress = true
+                outgoing_cast_active = true
             end
+
             --Detect Outgoing Job Abilities, Category 9
         elseif packet['Category'] == 9 then
-            local ability_id = packet['Param'] -- The ID of the ability being used
+            local ability_id = packet['Param']
 
-            --Check if detected ability is tracked before continuing
-            if tracked_abilities[ability_id] then
+            local a_info = ability_info[ability_id]
+            if a_info and settings[a_info.category] then
                 debug('Outgoing ability ID is tracked. Continuing to messaging.')
 
-                --Extract Target and Spell Data from the packet.
                 local target_id = packet['Target']
                 debug("Target of outgoing spell is " .. target_id)
                 local ability_data = res.job_abilities[ability_id]
                 debug("Outgoing ability name is " .. ability_data.en)
 
-                --Get player and target and then send spell cast notifications.
                 local player = windower.ffxi.get_player() or "Unknown Player ID"
                 local target_mob = windower.ffxi.get_mob_by_id(target_id)
                 local target_name = target_mob and target_mob.name or "Unknown Target"
                 debug(player.name .. " is attempting to use: " .. ability_data.en .. " on " .. target_name)
 
-                --IPC Messaging is not received by the caster/sender.  Must track self casts separately.
                 if target_name == player.name then
                     debug("Self Cast Detected")
                 end
 
-                --Calculate AoE Targets
-                if aoe_abilities[ability_id] then
+                if a_info.aoe then
                     debug("AoE Ability Cast Detected.  Calculating targets.")
 
                     local party = windower.ffxi.get_party()
@@ -400,31 +318,21 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                     local threshold_squared = max_distance * max_distance
 
                     for slot, member in pairs(party) do
-                        -- Ensure the slot contains a valid party member table with a name
                         if type(member) == 'table' and member.name then
-                            -- Get the full mob table for this specific party member to fetch coordinates
                             local member_mob = windower.ffxi.get_mob_by_name(member.name)
-
                             if member_mob then
-                                -- Calculate spatial deltas between the party member and the spell target
                                 local dx = member_mob.x - target_mob.x
                                 local dy = member_mob.y - target_mob.y
                                 local dz = member_mob.z - target_mob.z
-
-                                -- Compute 3D Euclidean distance squared
                                 local distance_squared = (dx * dx) + (dy * dy) + (dz * dz)
 
-                                -- Compare directly against the squared threshold
                                 if distance_squared <= threshold_squared then
                                     debug(member.name .. " is WITHIN 10 yalms of " .. target_mob.name)
                                     table.insert(nearby_members, member.name)
-
-                                    -- TODO: Pack this player into an IPC broadcast table
                                 else
                                     debug(member.name .. " is OUT of range.")
                                 end
                             else
-                                -- The party member is out of zone or beyond local draw distance limits
                                 debug(member.name .. " data unavailable (Too far away).")
                             end
                         end
@@ -435,11 +343,10 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                     end
                 end
 
-                --Send IPC Message to others indicating target and ability name.
-                local msg = string.format("HERALD_ABILITY|%s|%s", target_name, ability_data.id)
+                local msg = string.format("HERALD_ABILITY|%s|%s|%s", player.name, target_name, ability_data.id)
                 debug("IPC Message Sent: " .. msg)
                 windower.send_ipc_message(msg)
-                in_progress = true
+                outgoing_cast_active = true
             end
         end
     end
@@ -448,54 +355,42 @@ end)
 --Register when casting is completed, only during a previously registered cast.
 windower.register_event('incoming chunk', function(id, data, modified, injected, blocked)
     if not addon_enabled then return end
-    --Watch for the server's authoritative action confirmation packet
     if id == 0x028 then
         local packet = packets.parse('incoming', data)
         local player = windower.ffxi.get_player()
 
-        --Ensure the actor for the incoming packet is self prior to performing any operation.
         if player and packet['Actor'] == player.id then
             debug("Confirmed that player is the packet actor")
             local category = packet['Category']
             debug("0x028 packet category is " .. category)
 
-            --Detect tracked spell cast, Broadcast IPC message and reset state
-            --Category 4 = Spell Cast Completed Successfully
-            if category == 4 and in_progress then
+            -- Spell Cast Completed
+            if category == 4 and outgoing_cast_active then
                 debug("Category 4 Spell Cast Completion Detected")
                 local spell_id = packet['Param']
-
-                --Broadcast the completion payload over IPC
-                --Structure: HERALD_DONE|PlayerName|SpellID
                 local msg = string.format("HERALD_DONE|%s|%s", player.name, spell_id)
                 windower.send_ipc_message(msg)
-                in_progress = false
+                outgoing_cast_active = false
                 debug("Cast complete! Broadcasted IPC: " .. msg)
 
-                --Detect tracked ability completion, Broadcast IPC message and reset state
-                --Category 3 = Job Ability Completed Successfully
-            elseif category == 14 and in_progress then
+                -- Job Ability Completed
+            elseif category == 14 and outgoing_cast_active then
                 debug("Category 14 Ability Cast Completion Detected")
                 local ability_id = packet['Param']
-
-                --Broadcast the completion payload over IPC
-                --Structure: HERALD_DONE|PlayerName|AbilityID
                 local msg = string.format("HERALD_DONE|%s|%s", player.name, ability_id)
                 windower.send_ipc_message(msg)
-                in_progress = false
+                outgoing_cast_active = false
                 debug("JA cast complete! Broadcasted IPC: " .. msg)
 
-
-                --Detect spell intefrrupts, broadcast IPC message and reset state.
-                --Category 5 = Spell Cast Interrupted
-            elseif category == 5 and in_progress then
+                -- Spell Cast Interrupted
+            elseif category == 5 and outgoing_cast_active then
                 debug("Category 5 detected - Spell Interrupted")
                 local msg_id = packet['Param']
                 if msg_id == 16 or msg_id == 85 then
                     local msg = string.format("HERALD_INTERRUPT|%s", player.name)
                     windower.send_ipc_message(msg)
                     debug("Cast interrupted! Broadcasted IPC: " .. msg)
-                    in_progress = false
+                    outgoing_cast_active = false
                 end
             end
         end
@@ -505,75 +400,74 @@ end)
 --Receive IPC Messages, send commands to gearswap and set casting state
 windower.register_event('ipc message', function(msg)
     if not addon_enabled then return end
+
     if msg:startswith('HERALD|') then
         debug("IPC Message Received: " .. msg)
 
         local split_msg = msg:split("|")
-        local target_name = split_msg[2] or "Missing Target Name"
-        local spell_id = split_msg[3] or "Missing Spell ID"
+        local caster_name = split_msg[2]
+        local target_name = split_msg[3] or "Missing Target Name"
+        local spell_id = split_msg[4] or "Missing Spell ID"
 
         local player = windower.ffxi.get_player() or "Unknown Player ID"
-        if string.find(target_name, player.name, 1, true) and not in_progress then
-            equip_gear(tonumber(spell_id))
-            in_progress = true
+        if string.find(target_name, player.name, 1, true) then
+            if next(active_incoming_casters) == nil then
+                equip_gear(tonumber(spell_id))
+            end
+
+            -- Add caster to active pool and refresh failsafe timer
+            active_incoming_casters[caster_name] = true
+            debug(caster_name .. " added to Active Incoming Casters (" .. count_keys(active_incoming_casters) .. ")")
             failsafe_active = true
             failsafe_trigger_time = os.clock() + settings.delay
-            debug(player.name .. " is recognized within targets list. Equipping gear and setting in_progress to true")
+            debug(player.name .. " is targeted by " .. caster_name .. ". Gear equipped and timer refreshed.")
         end
     elseif msg:startswith('HERALD_ABILITY|') then
         debug("IPC Message Received: " .. msg)
 
         local split_msg = msg:split("|")
-        local target_name = split_msg[2] or "Missing Target Name"
-        local ability_id = split_msg[3] or "Missing Ability ID"
+        local caster_name = split_msg[2]
+        local target_name = split_msg[3] or "Missing Target Name"
+        local ability_id = split_msg[4] or "Missing Ability ID"
 
         local player = windower.ffxi.get_player() or "Unknown Player ID"
-        if string.find(target_name, player.name, 1, true) and not in_progress then
-            equip_gear_ability(tonumber(ability_id))
-            in_progress = true
+        if string.find(target_name, player.name, 1, true) then
+            if next(active_incoming_casters) == nil then
+                equip_gear_ability(tonumber(ability_id))
+            end
+
+            active_incoming_casters[caster_name] = true
+            debug(caster_name .. " added to Active Incoming Casters (" .. count_keys(active_incoming_casters) .. ")")
             failsafe_active = true
             failsafe_trigger_time = os.clock() + settings.delay
-            debug(player.name .. " is recognized within targets list. Equipping gear and setting in_progress to true")
+            debug(player.name .. " is targeted by " .. caster_name .. ". Gear equipped and timer refreshed.")
         end
-    elseif msg:startswith("HERALD_DONE|") and in_progress then
-        debug("IPC Message Received: " .. msg)
-
-        local split_msg = msg:split("|")
-        local caster_name = split_msg[2]
-        local spell_id = split_msg[3]
-
-        windower.send_command(equip_reset_command)
-        in_progress = false
-        debug(caster_name .. " has finished casting spell/ability ID: " .. spell_id .. " Resetting in_progress")
-    elseif msg:startswith("HERALD_INTERRUPT|") and in_progress then
+    elseif msg:startswith("HERALD_DONE|") or msg:startswith("HERALD_INTERRUPT|") then
         debug("IPC Message Received: " .. msg)
 
         local split_msg = msg:split("|")
         local caster_name = split_msg[2]
 
-        debug(caster_name .. " has been interrupted while casting. Resetting in_progress")
-        in_progress = false
+        if active_incoming_casters[caster_name] then
+            active_incoming_casters[caster_name] = nil
+            debug(caster_name .. " finished casting. Removed from pool. (" .. count_keys(active_incoming_casters) .. ")")
+
+            -- If no one is actively casting on us anymore, reset gear
+            if next(active_incoming_casters) == nil then
+                windower.send_command(equip_reset_command)
+                debug("No active incoming casts remain. Resetting gear.")
+            end
+        end
     elseif msg:startswith("HERALD_SETTINGS|") then
         debug("IPC Message Received: " .. msg)
-        local split_msg = msg:split("|")
-        local setting = split_msg[2]
-        local new_setting = split_msg[3]
-        if setting == "Debug" then
-            settings.debug_mode = (new_setting == "true")
-        elseif setting == "Delay" then
-            settings.delay = tonumber(new_setting)
-        elseif setting == "Phalanx" then
-            settings.track_phalanx = (new_setting == "true")
-        elseif setting == "Regen" then
-            settings.track_regen = (new_setting == "true")
-        elseif setting == "Protect/Shell" then
-            settings.track_protect_shell = (new_setting == "true")
-        elseif setting == "Cursna" then
-            settings.track_cursna = (new_setting == "true")
-        elseif setting == "Cure" then
-            settings.track_cure = (new_setting == "true")
-        end
-        log_echo(setting .. ' is now ' .. new_setting)
+
+        -- Prevent file write collisions by staggering the saves randomly between 0.5 and 2.5 seconds
+        local load_delay = 2.5
+        coroutine.schedule(function()
+            load_character_settings()
+            debug("Settings changed on another character, reloaded after " ..
+                string.format("%.2f", load_delay) .. "s delay.")
+        end, load_delay)
     end
 end)
 
@@ -585,52 +479,63 @@ windower.register_event('addon command', function(cmd, ...)
     if cmd == 'on' then
         log_echo('Enabled.')
         addon_enabled = true
-        in_progress = false
+        outgoing_cast_active = false
+        active_incoming_casters = {}
         failsafe_active = false
         failsafe_trigger_time = 0
     elseif cmd == 'off' then
         log_echo('Disabled.')
         addon_enabled = false
-        in_progress = false
+        outgoing_cast_active = false
+        active_incoming_casters = {}
         failsafe_active = false
         failsafe_trigger_time = 0
     elseif cmd == 'debug' then
         settings.debug_mode = not settings.debug_mode
         log_echo('Debug Mode ' .. tostring(settings.debug_mode))
-        windower.send_ipc_message("HERALD_SETTINGS|" .. "Debug|" .. tostring(settings.debug_mode))
     elseif cmd == 'delay' then
         local new_delay = tonumber(args[1])
         if new_delay and new_delay >= 1.5 then
             settings.delay = new_delay
             log_echo('Failsafe reset delay is now: ' .. settings.delay .. ' seconds.')
-            windower.send_ipc_message("HERALD_SETTINGS|" .. "Delay|" .. settings.delay)
         else
             log_echo('Invalid delay value. Must be >= 1.5. Example: //her delay 1.5')
         end
     elseif cmd == 'protect' then
         settings.track_protect_shell = not settings.track_protect_shell
         log_echo('Protect and Shell tracking ' .. tostring(settings.track_protect_shell))
-        windower.send_ipc_message("HERALD_SETTINGS|" .. "Debug|" .. tostring(settings.track_protect_shell))
     elseif cmd == 'phalanx' then
         settings.track_phalanx = not settings.track_phalanx
         log_echo('Phalanx tracking ' .. tostring(settings.track_phalanx))
-        windower.send_ipc_message("HERALD_SETTINGS|" .. "Phalanx|" .. tostring(settings.track_phalanx))
     elseif cmd == 'regen' then
         settings.track_regen = not settings.track_regen
         log_echo('Regen tracking ' .. tostring(settings.track_regen))
-        windower.send_ipc_message("HERALD_SETTINGS|" .. "Regen|" .. tostring(settings.track_regen))
     elseif cmd == 'cursna' then
         settings.track_cursna = not settings.track_cursna
         log_echo('Cursna tracking ' .. tostring(settings.track_cursna))
-        windower.send_ipc_message("HERALD_SETTINGS|" .. "Cursna|" .. tostring(settings.track_cursna))
     elseif cmd == "cure" then
         settings.track_cure = not settings.track_cure
         log_echo('Cure tracking ' .. tostring(settings.track_cure))
-        windower.send_ipc_message("HERALD_SETTINGS|" .. "Cure|" .. tostring(settings.track_cure))
     else
         log_echo(
             "Unknown command. Options: //herald //her [help|on|off|debug|cure|cursna|phalanx|regen|protect|delay <seconds>]")
+        return
     end
+
+    local save_delay = math.random() * 2 + 0.5
+    coroutine.schedule(function()
+        config.save(settings, 'global')
+        debug("Settings saved to disk after " .. string.format("%.2f", save_delay) .. "s delay.")
+        log_echo('Tracked Spells: Cure/Waltz ' .. (settings.track_cure and "ON" or "OFF") .. ' | Cursna ' ..
+            (settings.track_cursna and "ON" or "OFF") ..
+            ' | Phalanx ' ..
+            (settings.track_phalanx and "ON" or "OFF") ..
+            ' | Regen ' ..
+            (settings.track_regen and "ON" or "OFF") .. ' | Protect ' .. (settings.track_protect_shell and "ON" or "OFF"))
+        log_echo("Failsafe equipment reversion delay is " ..
+            tostring(settings.delay) .. "s and debug mode is " .. (settings.debug_mode and "ON" or "OFF"))
+        windower.send_ipc_message("HERALD_SETTINGS|Save|All")
+    end, save_delay)
 end)
 
 windower.register_event('prerender', function()
@@ -639,8 +544,8 @@ windower.register_event('prerender', function()
     if os.clock() >= failsafe_trigger_time then
         failsafe_active = false
         failsafe_trigger_time = 0
-        in_progress = false
-        windower.send_command("gs c update auto")
+        active_incoming_casters = {}
+        windower.send_command(equip_reset_command)
         debug("Failsafe triggered! Sending equipment reset command.")
     end
 end)
