@@ -19,18 +19,20 @@ DEALINGS IN THE SOFTWARE.
 
 _addon.name = 'Herald'
 _addon.author = 'Rahvin'
-_addon.version = '1.2'
+_addon.version = '1.3'
 _addon.commands = { 'her', 'herald' }
 
 local packets = require('packets')
 local res = require('resources')
 local config = require('config')
+local socket = require('socket')
 
 --User-Defined equipment sets for your gearswap.  Modify in gearswap to match these, or modify the sets and the reset command here to match your gearswap.
 local cure_set = "sets.Cure_Received"
 local cursna_set = "sets.Cursna_Received"
 local phalanx_set = "sets.Phalanx_Received"
 local protect_shell_set = "sets.Protect_Shell_Received"
+local refresh_set = "sets.Refresh_Received"
 local regen_set = "sets.Regen_Received"
 local equip_reset_command = "gs c update auto"
 
@@ -38,109 +40,93 @@ local equip_reset_command = "gs c update auto"
 local default_settings = {
     debug_mode = false,
     delay = 3,
+    track_cure = true,
     track_cursna = true,
     track_phalanx = true,
-    track_regen = true,
-    track_cure = true,
     track_protect_shell = true,
+    track_refresh = true,
+    track_regen = true,
 }
 local settings = {}
 
 local addon_enabled = true
 local outgoing_cast_active = false
 local active_incoming_casters = {}
+local cast_start_time = 0
 local failsafe_active = false
 local failsafe_trigger_time = 0
 
--- Consolidated spell definitions using metadata to dictate categories and AoE rules
+-- Spell definitions with metadata to dictate equipment categories and AoE rules
 local spell_info = {
     -- Cursna
-    [20] = { category = 'track_cursna', equip = cursna_set, aoe = false, majesty = false },
+    [20] = { category = 'track_cursna', equip = cursna_set, aoe = false, majesty = false, accession = true },                --Cursna
     -- Phalanx
-    [106] = { category = 'track_phalanx', equip = phalanx_set, aoe = false, majesty = false },
-    [107] = { category = 'track_phalanx', equip = phalanx_set, aoe = false, majesty = false },
+    [106] = { category = 'track_phalanx', equip = phalanx_set, aoe = false, majesty = false, accession = true },             --Phalanx
+    [107] = { category = 'track_phalanx', equip = phalanx_set, aoe = false, majesty = false, accession = false },            --Phalanx II
     -- Regen
-    [108] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
-    [110] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
-    [111] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
-    [477] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
-    [504] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false },
-    -- Protect (Majesty affected)
-    [43] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
-    [44] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
-    [45] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
-    [46] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
-    [47] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true },
-    [125] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
-    [126] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
-    [127] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
-    [128] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
-    [129] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true },
+    [108] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen
+    [110] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen II
+    [111] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen III
+    [477] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen IV
+    [504] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen V
+    -- Protect
+    [43] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect
+    [44] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect II
+    [45] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect III
+    [46] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect IV
+    [47] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect V
+    [125] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra
+    [126] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra II
+    [127] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra III
+    [128] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra IV
+    [129] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra V
     -- Shell
-    [48] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
-    [49] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
-    [50] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
-    [51] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
-    [52] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false },
-    [130] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
-    [131] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
-    [132] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
-    [133] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
-    [134] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false },
+    [48] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell
+    [49] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell II
+    [50] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell III
+    [51] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell IV
+    [52] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell V
+    [130] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra
+    [131] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra II
+    [132] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra III
+    [133] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra IV
+    [134] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra V
     -- Cure
-    [1] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
-    [2] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
-    [3] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
-    [4] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
-    [5] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
-    [6] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true },
+    [1] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = true },                      --Cure
+    [2] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = true },                      --Cure II
+    [3] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = true },                      --Cure III
+    [4] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = true },                      --Cure IV
+    [5] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = false },                     --Cure V
+    [6] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = false },                     --Cure VI
     -- Curaga / Cura
-    [7] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
-    [8] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
-    [9] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
-    [10] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
-    [11] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
-    [93] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
-    [474] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
-    [475] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = true },
+    [7] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                     --Curaga
+    [8] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                     --Curaga II
+    [9] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                     --Curaga III
+    [10] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                    --Curaga IV
+    [11] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                    --Curaga V
+    [93] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                    --Cura
+    [474] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                   --Cura II
+    [475] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                   --Cura III
+    --Refresh
+    [109] = { category = 'track_refresh', equip = refresh_set, aoe = false, majesty = false, accession = true },             --Refresh
+    [473] = { category = 'track_refresh', equip = refresh_set, aoe = false, majesty = false, accession = false },            --Refresh II
+    [894] = { category = 'track_refresh', equip = refresh_set, aoe = false, majesty = false, accession = false },            --Refresh III
 }
 
 -- Consolidated abilities mapping
 local ability_info = {
-    [190] = { category = 'track_cure', equip = cure_set, aoe = false },
-    [191] = { category = 'track_cure', equip = cure_set, aoe = false },
-    [192] = { category = 'track_cure', equip = cure_set, aoe = false },
-    [193] = { category = 'track_cure', equip = cure_set, aoe = false },
-    [311] = { category = 'track_cure', equip = cure_set, aoe = false },
-    [195] = { category = 'track_cure', equip = cure_set, aoe = true },
-    [262] = { category = 'track_cure', equip = cure_set, aoe = true },
+    [190] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz
+    [191] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz II
+    [192] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz III
+    [193] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz IV
+    [311] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz V
+    [195] = { category = 'track_cure', equip = cure_set, aoe = true, accession = false },  --Divine Waltz
+    [262] = { category = 'track_cure', equip = cure_set, aoe = true, accession = false },  --Divine Waltz II
 }
 
 
-local function log_echo(message, color_id)
-    windower.add_to_chat(color_id or 204, '[Herald] ' .. message)
-end
-
-local function debug(message, color_id)
-    if not settings.debug_mode then return end
-    local timestamp = math.floor(os.clock() * 1000)
-    windower.add_to_chat(color_id or 204, "[Herald] [Time: " .. timestamp .. "] DEBUG: " .. message)
-end
-
-local function equip_gear(spell_id)
-    local info = spell_info[spell_id]
-    if info then
-        debug("Sending Equip Command: " .. info.equip)
-        windower.send_command("gs equip " .. info.equip)
-    end
-end
-
-local function equip_gear_ability(ability_id)
-    local info = ability_info[ability_id]
-    if info then
-        debug("Sending Equip Command: " .. info.equip)
-        windower.send_command("gs equip " .. info.equip)
-    end
+local function get_time()
+    return math.floor(socket.gettime() * 1000)
 end
 
 local function count_keys(tbl)
@@ -151,16 +137,43 @@ local function count_keys(tbl)
     return count
 end
 
+local function log_echo(message, color_id)
+    windower.add_to_chat(color_id or 204, '[Herald] ' .. message)
+end
+
+local function debug(message, color_id)
+    if not settings.debug_mode then return end
+    windower.add_to_chat(color_id or 204, "[Herald] [Time: " .. get_time() .. "] DEBUG: " .. message)
+end
+
+local function equip_gear(spell_id)
+    local info = spell_info[spell_id]
+    local elapsed_ms = get_time() - cast_start_time
+    if info then
+        debug(string.format("Sending Equip Command: %s %s ms after cast start.", info.equip, elapsed_ms))
+        windower.send_command("gs equip " .. info.equip)
+    end
+end
+
+local function equip_gear_ability(ability_id)
+    local info = ability_info[ability_id]
+    if info then
+        debug("Sending Equip Command: " ..
+            info.equip .. " " .. (get_time() - cast_start_time) .. " ms after JA start.")
+        windower.send_command("gs equip " .. info.equip)
+    end
+end
+
 local function load_character_settings()
     settings = config.load(default_settings, 'global')
-    log_echo('Tracked Spells: Cure/Waltz ' .. (settings.track_cure and "ON" or "OFF") .. ' | Cursna ' ..
-        (settings.track_cursna and "ON" or "OFF") ..
-        ' | Phalanx ' ..
-        (settings.track_phalanx and "ON" or "OFF") ..
-        ' | Regen ' ..
-        (settings.track_regen and "ON" or "OFF") .. ' | Protect ' .. (settings.track_protect_shell and "ON" or "OFF"))
-    log_echo("Failsafe equipment reversion delay is " ..
-        tostring(settings.delay) .. "s and debug mode is " .. (settings.debug_mode and "ON" or "OFF"))
+    log_echo('Cure/Waltz ' .. (settings.track_cure and "ON" or "OFF") ..
+        ' | Cursna ' .. (settings.track_cursna and "ON" or "OFF") ..
+        ' | Phalanx ' .. (settings.track_phalanx and "ON" or "OFF") ..
+        ' | Protect ' .. (settings.track_protect_shell and "ON" or "OFF") ..
+        ' | Refresh ' .. (settings.track_refresh and "ON" or "OFF") ..
+        ' | Regen ' .. (settings.track_regen and "ON" or "OFF") ..
+        ' | Failsafe ' .. settings.delay .. 's' ..
+        ' | Debug ' .. (settings.debug_mode and "ON" or "OFF"))
 end
 
 local function set_random_seeds()
@@ -211,13 +224,9 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
             if s_info and settings[s_info.category] then
                 debug('Outgoing Spell ID is tracked. Continuing to messaging.')
 
-                --Extract Target and Spell Data from the packet.
+                --Extract Player, Target and Spell Data from the packet.
                 local target_id = packet['Target']
-                debug("Target of outgoing spell is " .. target_id)
                 local spell_data = res.spells[spell_id]
-                debug("Outgoing spell name is " .. spell_data.en)
-
-                --Get player and target and then send spell cast notifications.
                 local player = windower.ffxi.get_player() or "Unknown Player ID"
                 local target_mob = windower.ffxi.get_mob_by_id(target_id)
                 local target_name = target_mob and target_mob.name or "Unknown Target"
@@ -225,7 +234,8 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
 
                 --IPC Messaging is not received by the caster/sender.  Must track self casts separately.
                 if target_name == player.name then
-                    debug("Self Cast Detected")
+                    debug(
+                        "Self Cast Detected - Caster will use their normal precast, midcast, aftercast gear.  Set your midcast gear for combined casting and spell received bonus.")
                 end
 
                 --Calculate AoE Targets
@@ -242,7 +252,7 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                     end
                 end
 
-                if s_info.aoe or accession_active or (majesty_active and s_info.majesty) then
+                if s_info.aoe or (accession_active and s_info.accession) or (majesty_active and s_info.majesty) then
                     debug("AoE Spell Cast Detected.  Calculating targets.")
 
                     local party = windower.ffxi.get_party()
@@ -265,7 +275,7 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                                     debug(member.name .. " is WITHIN 10 yalms of " .. target_mob.name)
                                     table.insert(nearby_members, member.name)
                                 else
-                                    debug(member.name .. " is OUT of range.")
+                                    debug(member.name .. " is OUT of aoe range from " .. target_mob.name)
                                 end
                             else
                                 debug(member.name .. " data unavailable (Too far away).")
@@ -279,7 +289,7 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                 end
 
                 --Send IPC Message to others indicating sender, target, and spell name.
-                local msg = string.format("HERALD|%s|%s|%s", player.name, target_name, spell_data.id)
+                local msg = string.format("HERALD|%s|%s|%s|%.0f", player.name, target_name, spell_data.id, get_time())
                 debug("IPC Message Sent: " .. msg)
                 windower.send_ipc_message(msg)
                 outgoing_cast_active = true
@@ -293,11 +303,9 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
             if a_info and settings[a_info.category] then
                 debug('Outgoing ability ID is tracked. Continuing to messaging.')
 
+                --Extract Player, Target and Ability Data from the packet.
                 local target_id = packet['Target']
-                debug("Target of outgoing spell is " .. target_id)
                 local ability_data = res.job_abilities[ability_id]
-                debug("Outgoing ability name is " .. ability_data.en)
-
                 local player = windower.ffxi.get_player() or "Unknown Player ID"
                 local target_mob = windower.ffxi.get_mob_by_id(target_id)
                 local target_name = target_mob and target_mob.name or "Unknown Target"
@@ -330,7 +338,7 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                                     debug(member.name .. " is WITHIN 10 yalms of " .. target_mob.name)
                                     table.insert(nearby_members, member.name)
                                 else
-                                    debug(member.name .. " is OUT of range.")
+                                    debug(member.name .. " is OUT of aoe range from " .. target_mob.name)
                                 end
                             else
                                 debug(member.name .. " data unavailable (Too far away).")
@@ -343,7 +351,8 @@ windower.register_event('outgoing chunk', function(id, data, modified, injected,
                     end
                 end
 
-                local msg = string.format("HERALD_ABILITY|%s|%s|%s", player.name, target_name, ability_data.id)
+                local msg = string.format("HERALD_ABILITY|%s|%s|%s|%.0f", player.name, target_name, ability_data.id,
+                    get_time())
                 debug("IPC Message Sent: " .. msg)
                 windower.send_ipc_message(msg)
                 outgoing_cast_active = true
@@ -360,36 +369,33 @@ windower.register_event('incoming chunk', function(id, data, modified, injected,
         local player = windower.ffxi.get_player()
 
         if player and packet['Actor'] == player.id then
-            debug("Confirmed that player is the packet actor")
             local category = packet['Category']
-            debug("0x028 packet category is " .. category)
+            debug("Player has initiated 0x028 packet of category " .. category)
 
             -- Spell Cast Completed
             if category == 4 and outgoing_cast_active then
-                debug("Category 4 Spell Cast Completion Detected")
                 local spell_id = packet['Param']
-                local msg = string.format("HERALD_DONE|%s|%s", player.name, spell_id)
+                local msg = string.format("HERALD_DONE|%s|%s|%.0f", player.name, spell_id, get_time())
                 windower.send_ipc_message(msg)
                 outgoing_cast_active = false
-                debug("Cast complete! Broadcasted IPC: " .. msg)
+                debug("Category 4 - Spell cast complete! Broadcasted IPC: " .. msg)
 
                 -- Job Ability Completed
             elseif category == 14 and outgoing_cast_active then
-                debug("Category 14 Ability Cast Completion Detected")
                 local ability_id = packet['Param']
-                local msg = string.format("HERALD_DONE|%s|%s", player.name, ability_id)
+                local msg = string.format("HERALD_DONE|%s|%s|%.0f", player.name, ability_id, get_time())
                 windower.send_ipc_message(msg)
                 outgoing_cast_active = false
-                debug("JA cast complete! Broadcasted IPC: " .. msg)
+                debug("Category 14 - JA cast complete! Broadcasted IPC: " .. msg)
 
                 -- Spell Cast Interrupted
             elseif category == 5 and outgoing_cast_active then
                 debug("Category 5 detected - Spell Interrupted")
                 local msg_id = packet['Param']
                 if msg_id == 16 or msg_id == 85 then
-                    local msg = string.format("HERALD_INTERRUPT|%s", player.name)
+                    local msg = string.format("HERALD_INTERRUPT|%s|%s|%.0f", player.name, msg_id, get_time())
                     windower.send_ipc_message(msg)
-                    debug("Cast interrupted! Broadcasted IPC: " .. msg)
+                    debug("Category 5 - Cast interrupted! Broadcasted IPC: " .. msg)
                     outgoing_cast_active = false
                 end
             end
@@ -402,16 +408,20 @@ windower.register_event('ipc message', function(msg)
     if not addon_enabled then return end
 
     if msg:startswith('HERALD|') then
-        debug("IPC Message Received: " .. msg)
-
         local split_msg = msg:split("|")
         local caster_name = split_msg[2]
         local target_name = split_msg[3] or "Missing Target Name"
         local spell_id = split_msg[4] or "Missing Spell ID"
+        local time_sent = split_msg[5]
+
+        local time_received = get_time()
+        debug("IPC Message Received: " ..
+            msg .. " after " .. (time_sent - time_received) .. " ms since sending")
 
         local player = windower.ffxi.get_player() or "Unknown Player ID"
         if string.find(target_name, player.name, 1, true) then
             if next(active_incoming_casters) == nil then
+                cast_start_time = time_sent
                 equip_gear(tonumber(spell_id))
             end
 
@@ -423,16 +433,18 @@ windower.register_event('ipc message', function(msg)
             debug(player.name .. " is targeted by " .. caster_name .. ". Gear equipped and timer refreshed.")
         end
     elseif msg:startswith('HERALD_ABILITY|') then
-        debug("IPC Message Received: " .. msg)
-
         local split_msg = msg:split("|")
         local caster_name = split_msg[2]
         local target_name = split_msg[3] or "Missing Target Name"
         local ability_id = split_msg[4] or "Missing Ability ID"
+        local time_sent = split_msg[5]
+
+        debug("IPC Message Received: " .. msg .. " after " .. (get_time() - time_sent) .. " ms since sending")
 
         local player = windower.ffxi.get_player() or "Unknown Player ID"
         if string.find(target_name, player.name, 1, true) then
             if next(active_incoming_casters) == nil then
+                cast_start_time = time_sent
                 equip_gear_ability(tonumber(ability_id))
             end
 
@@ -443,14 +455,17 @@ windower.register_event('ipc message', function(msg)
             debug(player.name .. " is targeted by " .. caster_name .. ". Gear equipped and timer refreshed.")
         end
     elseif msg:startswith("HERALD_DONE|") or msg:startswith("HERALD_INTERRUPT|") then
-        debug("IPC Message Received: " .. msg)
-
         local split_msg = msg:split("|")
         local caster_name = split_msg[2]
+        local time_sent = tonumber(split_msg[4])
 
+        debug("IPC Message Received: " .. msg .. " after " .. (get_time() - time_sent) .. " ms since sending")
         if active_incoming_casters[caster_name] then
             active_incoming_casters[caster_name] = nil
-            debug(caster_name .. " finished casting. Removed from pool. (" .. count_keys(active_incoming_casters) .. ")")
+            debug(caster_name ..
+                " finished casting after " ..
+                (time_sent - cast_start_time) ..
+                " ms and is removed from casting pool (" .. count_keys(active_incoming_casters) .. ")")
 
             -- If no one is actively casting on us anymore, reset gear
             if next(active_incoming_casters) == nil then
@@ -462,7 +477,7 @@ windower.register_event('ipc message', function(msg)
         debug("IPC Message Received: " .. msg)
 
         -- Prevent file write collisions by staggering the saves randomly between 0.5 and 2.5 seconds
-        local load_delay = 2.5
+        local load_delay = math.random() * 2 + 0.5
         coroutine.schedule(function()
             load_character_settings()
             debug("Settings changed on another character, reloaded after " ..
@@ -503,22 +518,25 @@ windower.register_event('addon command', function(cmd, ...)
         end
     elseif cmd == 'protect' then
         settings.track_protect_shell = not settings.track_protect_shell
-        log_echo('Protect and Shell tracking ' .. tostring(settings.track_protect_shell))
+        log_echo('Protect and Shell tracking is now ' .. tostring(settings.track_protect_shell))
     elseif cmd == 'phalanx' then
         settings.track_phalanx = not settings.track_phalanx
-        log_echo('Phalanx tracking ' .. tostring(settings.track_phalanx))
+        log_echo('Phalanx tracking is now ' .. tostring(settings.track_phalanx))
     elseif cmd == 'regen' then
         settings.track_regen = not settings.track_regen
-        log_echo('Regen tracking ' .. tostring(settings.track_regen))
+        log_echo('Regen tracking is now ' .. tostring(settings.track_regen))
     elseif cmd == 'cursna' then
         settings.track_cursna = not settings.track_cursna
-        log_echo('Cursna tracking ' .. tostring(settings.track_cursna))
+        log_echo('Cursna tracking is now ' .. tostring(settings.track_cursna))
     elseif cmd == "cure" then
         settings.track_cure = not settings.track_cure
-        log_echo('Cure tracking ' .. tostring(settings.track_cure))
+        log_echo('Cure tracking is now ' .. tostring(settings.track_cure))
+    elseif cmd == "refresh" then
+        settings.track_refresh = not settings.track_refresh
+        log_echo('Refresh tracking is now ' .. tostring(settings.track_refresh))
     else
         log_echo(
-            "Unknown command. Options: //herald //her [help|on|off|debug|cure|cursna|phalanx|regen|protect|delay <seconds>]")
+            "Unknown command. Options: //herald //her [help|on|off|debug|cure|cursna|phalanx|regen|refresh|protect|delay <seconds>]")
         return
     end
 
