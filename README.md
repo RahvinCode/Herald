@@ -3,9 +3,9 @@
 An open-source Final Fantasy XI Windower addon designed for multiboxers to track spellcasts and job abilities across locally connected game sessions, instantly swapping characters into specialized "received-buff" gear sets.
 
 ## Overview
-When managing multiple characters simultaneously, manually swapping specialized equipment to receive optimization bonuses (such as `sets.Phalanx_Received` or `sets.Cursna_Received`) is impractical. 
+When managing multiple characters simultaneously, manually swapping specialized equipment to receive optimization bonuses (such as `sets.Phalanx_Received` or `sets.Cursna_Received`) is impractical. Addons such as React and gearswap systems such as Selendrile's rely on deprecated action packets that take 600 ms or more to register that a cast has started.  With moderate fast cast, this means that your character will be equipping gear after the spell lands, making the swap pointless.
 
-**Herald** resolves this by listening directly to network chunk payloads across your multibox instances:
+**Herald** resolves this by listening directly to network chunk payloads across your multibox instances to provide alerts to the main and all eligible aoe targets within 0 to 3 ms from the start of cast:
 1. **Detection:** Intercepts outgoing action packets (`0x01A`) from a casting character to identify tracked spells or waltzes.
 2. **AoE Calculations:** Evaluates active stratagems/buffs (**Accession** or **Majesty**) and runs a live 3D Euclidean distance vector check (within 10 yalms) to cleanly map all affected party members.
 3. **IPC Broadcast:** Instantly fires data strings over Inter-Process Communication (IPC) to notify receiving characters.
@@ -15,23 +15,24 @@ When managing multiple characters simultaneously, manually swapping specialized 
 
 ## Features
 * **Cross-Instance Network Syncing** — Communicates states instantly across active local sessions via Windower's IPC channel.
-* **Smart AoE Target Packaging** — Calculates 3D distance positions relative to the spell target to include every nearby party member in a single, grouped string payload.
+* **Smart AoE Target Packaging** — Calculates 3D distance positions relative to the spell target to include every nearby party member in a single, grouped string payload.  Accounts for native aoe, Accession and Majesty.
 * **Granular Tracking Filters** — Deep support across specific critical spell and ability categories:
   * **Cures & Waltzes:** All tiers of Cure, Curaga, Cura, Curing Waltz, and Divine Waltz.
-  * **Enhancing Magic:** Phalanx I/II, Regen I–V, Protect I–V, Shell I–V, Protectra I–V, and Shellra I–V.
+  * **Enhancing Magic:** Phalanx I/II, Regen I–V, Refresh I-III, Protect I–V, Shell I–V, Protectra I–V, and Shellra I–V.
   * **Status Removal:** Cursna.
 * **Frame-Rendered Failsafe** — Utilizes a `prerender` event loop to guarantee equipment updates restore cleanly if an unexpected connection or status exception drops a packet handler.
 
 ---
 
 ## Gearswap Customization
-By default, Herald triggers targeted equipment macros directly inside your active Gearswap profiles. Ensure the variables at the top of your `Herald.lua` file map properly to your layout:
+By default, Herald triggers targeted equipment macros directly inside your active Gearswap profiles. Mirdain ecosystem uses "gs c update auto", while Selendriles uses "gs c update" for the equipment reset command. Ensure the variables at the top of your `Herald.lua` file map properly to your layout:
 
 ```lua
 local cure_set = "sets.Cure_Received"
 local cursna_set = "sets.Cursna_Received"
 local phalanx_set = "sets.Phalanx_Received"
 local protect_shell_set = "sets.Protect_Shell_Received"
+local refresh_set = "sets.Refresh_Received"
 local regen_set = "sets.Regen_Received"
 local equip_reset_command = "gs c update auto"
 ```
@@ -61,8 +62,9 @@ The addon recognizes both `//herald` and `//her` command aliases.
 | `//herald cure` | Toggles tracking for incoming Cures and Waltzes. |
 | `//herald cursna` | Toggles tracking for incoming Cursna casts. |
 | `//herald phalanx` | Toggles tracking for incoming Phalanx I & II spells. |
-| `//herald regen` | Toggles tracking for incoming Regen tiers. |
-| `//herald protect` | Toggles tracking for incoming Protect, Shell, Protectra, and Shellra tiers. |
+| `//herald protect` | Toggles tracking for incoming Protect, Shell, Protectra, and Shellra spells. |
+| `//herald refresh` | Toggles tracking for incoming Refresh spells. |
+| `//herald regen` | Toggles tracking for incoming Regen spells. |
 | `//herald delay <seconds>` | Adjusts the frame-rendered failsafe reset threshold (Must be $\ge$ 1.5 seconds). |
 | `//herald debug` | Toggles deep developer timestamp logs inside the chat screen. |
 
