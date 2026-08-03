@@ -49,5 +49,23 @@ function self_command(cmd)
             equip(external_set)
         end
         return
+    elseif command == 'herald_finished' then
+        -- Safely release the locked equipment slots and re-equip appropriate gear
+        for slot, _ in pairs(active_external_locks) do
+            enable(slot)
+        end
+        active_external_locks = {}
+
+        local built_set = choose_set()
+        if type(choose_set_custom) == 'function' then
+            built_set = set_combine(built_set, choose_set_custom())
+        else
+            -- Using a non-breaking print instead of warn() to protect console logs
+            warn('[Herald]: choose_set_custom() not found!')
+        end
+
+        -- Order the gear and then equip back to normal status
+        equip(built_set)
+        return
     end
 end
