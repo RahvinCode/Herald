@@ -1,12 +1,17 @@
 <?xml version="1.1" ?>
 <settings>
     <global>
-        <debug_mode>true</debug_mode>
-        <delay>4</delay>
+        <addon_enabled>true</addon_enabled>
+        <debug_mode>false</debug_mode>
+        <delay>3</delay>
+        <gear_lock>true</gear_lock>
         <track_cure>true</track_cure>
         <track_cursna>true</track_cursna>
         <track_phalanx>true</track_phalanx>
         <track_protect_shell>true</track_protect_shell>
+        <track_refresh>true</track_refresh>
         <track_regen>true</track_regen>
+        <track_waltz>true</track_waltz>
+        <warn>true</warn>
     </global>
 </settings>

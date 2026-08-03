@@ -19,37 +19,32 @@ DEALINGS IN THE SOFTWARE.
 
 _addon.name = 'Herald'
 _addon.author = 'Rahvin'
-_addon.version = '1.3'
+_addon.version = '2.0'
 _addon.commands = { 'her', 'herald' }
 
 local packets = require('packets')
 local res = require('resources')
 local config = require('config')
 local socket = require('socket')
-
---User-Defined equipment sets for your gearswap.  Modify in gearswap to match these, or modify the sets and the reset command here to match your gearswap.
-local cure_set = "sets.Cure_Received"
-local cursna_set = "sets.Cursna_Received"
-local phalanx_set = "sets.Phalanx_Received"
-local protect_shell_set = "sets.Protect_Shell_Received"
-local refresh_set = "sets.Refresh_Received"
-local regen_set = "sets.Regen_Received"
-local equip_reset_command = "gs c update auto"
+local gear_sets = require('herald_gear_sets')
 
 --Default Settings.  Overridden by Character Specific Settings.
 local default_settings = {
+    addon_enabled = true,
     debug_mode = false,
     delay = 3,
+    gear_lock = true,
+    warn = true,
     track_cure = true,
     track_cursna = true,
     track_phalanx = true,
     track_protect_shell = true,
     track_refresh = true,
     track_regen = true,
+    track_waltz = true,
 }
 local settings = {}
-
-local addon_enabled = true
+local chat_color = 121
 local outgoing_cast_active = false
 local active_incoming_casters = {}
 local cast_start_time = 0
@@ -59,76 +54,78 @@ local failsafe_trigger_time = 0
 -- Spell definitions with metadata to dictate equipment categories and AoE rules
 local spell_info = {
     -- Cursna
-    [20] = { category = 'track_cursna', equip = cursna_set, aoe = false, majesty = false, accession = true },                --Cursna
+    [20] = { name = "Cursna", category = 'track_cursna', equip = "cursna_set", aoe = false, majesty = false, accession = true },                      --Cursna
     -- Phalanx
-    [106] = { category = 'track_phalanx', equip = phalanx_set, aoe = false, majesty = false, accession = true },             --Phalanx
-    [107] = { category = 'track_phalanx', equip = phalanx_set, aoe = false, majesty = false, accession = false },            --Phalanx II
+    [106] = { name = "Phalanx", category = 'track_phalanx', equip = "phalanx_set", aoe = false, majesty = false, accession = true },                  --Phalanx
+    [107] = { name = "Phalanx II", category = 'track_phalanx', equip = "phalanx_set", aoe = false, majesty = false, accession = false },              --Phalanx II
     -- Regen
-    [108] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen
-    [110] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen II
-    [111] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen III
-    [477] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen IV
-    [504] = { category = 'track_regen', equip = regen_set, aoe = false, majesty = false, accession = true },                 --Regen V
+    [108] = { name = "Regen", category = 'track_regen', equip = "regen_set", aoe = false, majesty = false, accession = true },                        --Regen
+    [110] = { name = "Regen II", category = 'track_regen', equip = "regen_set", aoe = false, majesty = false, accession = true },                     --Regen II
+    [111] = { name = "Regen III", category = 'track_regen', equip = "regen_set", aoe = false, majesty = false, accession = true },                    --Regen III
+    [477] = { name = "Regen IV", category = 'track_regen', equip = "regen_set", aoe = false, majesty = false, accession = true },                     --Regen IV
+    [504] = { name = "Regen V", category = 'track_regen', equip = "regen_set", aoe = false, majesty = false, accession = true },                      --Regen V
     -- Protect
-    [43] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect
-    [44] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect II
-    [45] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect III
-    [46] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect IV
-    [47] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = true, accession = true },   --Protect V
-    [125] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra
-    [126] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra II
-    [127] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra III
-    [128] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra IV
-    [129] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = true, accession = false },  --Protectra V
+    [43] = { name = "Protect", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = true, accession = true },        --Protect
+    [44] = { name = "Protect II", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = true, accession = true },     --Protect II
+    [45] = { name = "Protect III", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = true, accession = true },    --Protect III
+    [46] = { name = "Protect IV", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = true, accession = true },     --Protect IV
+    [47] = { name = "Protect V", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = true, accession = true },      --Protect V
+    [125] = { name = "Protectra", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = true, accession = false },     --Protectra
+    [126] = { name = "Protectra II", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = true, accession = false },  --Protectra II
+    [127] = { name = "Protectra III", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = true, accession = false }, --Protectra III
+    [128] = { name = "Protectra IV", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = true, accession = false },  --Protectra IV
+    [129] = { name = "Protectra V", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = true, accession = false },   --Protectra V
     -- Shell
-    [48] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell
-    [49] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell II
-    [50] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell III
-    [51] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell IV
-    [52] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = false, majesty = false, accession = true },  --Shell V
-    [130] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra
-    [131] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra II
-    [132] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra III
-    [133] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra IV
-    [134] = { category = 'track_protect_shell', equip = protect_shell_set, aoe = true, majesty = false, accession = false }, --Shellra V
+    [48] = { name = "Shell", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = false, accession = true },         --Shell
+    [49] = { name = "Shell II", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = false, accession = true },      --Shell II
+    [50] = { name = "Shell III", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = false, accession = true },     --Shell III
+    [51] = { name = "Shell IV", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = false, accession = true },      --Shell IV
+    [52] = { name = "Shell V", category = 'track_protect_shell', equip = "protect_shell_set", aoe = false, majesty = false, accession = true },       --Shell V
+    [130] = { name = "Shellra", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = false, accession = false },      --Shellra
+    [131] = { name = "Shellra II", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = false, accession = false },   --Shellra II
+    [132] = { name = "Shellra III", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = false, accession = false },  --Shellra III
+    [133] = { name = "Shellra IV", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = false, accession = false },   --Shellra IV
+    [134] = { name = "Shellra V", category = 'track_protect_shell', equip = "protect_shell_set", aoe = true, majesty = false, accession = false },    --Shellra V
     -- Cure
-    [1] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = true },                      --Cure
-    [2] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = true },                      --Cure II
-    [3] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = true },                      --Cure III
-    [4] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = true },                      --Cure IV
-    [5] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = false },                     --Cure V
-    [6] = { category = 'track_cure', equip = cure_set, aoe = false, majesty = true, accession = false },                     --Cure VI
+    [1] = { name = "Cure", category = 'track_cure', equip = "cure_set", aoe = false, majesty = true, accession = true },                              --Cure
+    [2] = { name = "Cure II", category = 'track_cure', equip = "cure_set", aoe = false, majesty = true, accession = true },                           --Cure II
+    [3] = { name = "Cure III", category = 'track_cure', equip = "cure_set", aoe = false, majesty = true, accession = true },                          --Cure III
+    [4] = { name = "Cure IV", category = 'track_cure', equip = "cure_set", aoe = false, majesty = true, accession = true },                           --Cure IV
+    [5] = { name = "Cure V", category = 'track_cure', equip = "cure_set", aoe = false, majesty = true, accession = false },                           --Cure V
+    [6] = { name = "Cure VI", category = 'track_cure', equip = "cure_set", aoe = false, majesty = true, accession = false },                          --Cure VI
     -- Curaga / Cura
-    [7] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                     --Curaga
-    [8] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                     --Curaga II
-    [9] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                     --Curaga III
-    [10] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                    --Curaga IV
-    [11] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                    --Curaga V
-    [93] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                    --Cura
-    [474] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                   --Cura II
-    [475] = { category = 'track_cure', equip = cure_set, aoe = true, majesty = false, accession = false },                   --Cura III
+    [7] = { name = "Curaga", category = 'track_cure', equip = "cure_set", aoe = true, majesty = false, accession = false },                           --Curaga
+    [8] = { name = "Curaga II", category = 'track_cure', equip = "cure_set", aoe = true, majesty = false, accession = false },                        --Curaga II
+    [9] = { name = "Curaga III", category = 'track_cure', equip = "cure_set", aoe = true, majesty = false, accession = false },                       --Curaga III
+    [10] = { name = "Curaga IV", category = 'track_cure', equip = "cure_set", aoe = true, majesty = false, accession = false },                       --Curaga IV
+    [11] = { name = "Curaga V", category = 'track_cure', equip = "cure_set", aoe = true, majesty = false, accession = false },                        --Curaga V
+    [93] = { name = "Cura", category = 'track_cure', equip = "cure_set", aoe = true, majesty = false, accession = false },                            --Cura
+    [474] = { name = "Cura II", category = 'track_cure', equip = "cure_set", aoe = true, majesty = false, accession = false },                        --Cura II
+    [475] = { name = "Cura III", category = 'track_cure', equip = "cure_set", aoe = true, majesty = false, accession = false },                       --Cura III
     --Refresh
-    [109] = { category = 'track_refresh', equip = refresh_set, aoe = false, majesty = false, accession = true },             --Refresh
-    [473] = { category = 'track_refresh', equip = refresh_set, aoe = false, majesty = false, accession = false },            --Refresh II
-    [894] = { category = 'track_refresh', equip = refresh_set, aoe = false, majesty = false, accession = false },            --Refresh III
+    [109] = { name = "Refresh", category = 'track_refresh', equip = "refresh_set", aoe = false, majesty = false, accession = true },                  --Refresh
+    [473] = { name = "Refresh II", category = 'track_refresh', equip = "refresh_set", aoe = false, majesty = false, accession = false },              --Refresh II
+    [894] = { name = "Refresh III", category = 'track_refresh', equip = "refresh_set", aoe = false, majesty = false, accession = false },             --Refresh III
 }
 
 -- Consolidated abilities mapping
 local ability_info = {
-    [190] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz
-    [191] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz II
-    [192] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz III
-    [193] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz IV
-    [311] = { category = 'track_cure', equip = cure_set, aoe = false, accession = false }, --Curing Waltz V
-    [195] = { category = 'track_cure', equip = cure_set, aoe = true, accession = false },  --Divine Waltz
-    [262] = { category = 'track_cure', equip = cure_set, aoe = true, accession = false },  --Divine Waltz II
+    [190] = { name = "Curing Waltz", category = 'track_waltz', equip = "waltz_set", aoe = false, accession = false },     --Curing Waltz
+    [191] = { name = "Curing Waltz II", category = 'track_waltz', equip = "waltz_set", aoe = false, accession = false },  --Curing Waltz II
+    [192] = { name = "Curing Waltz III", category = 'track_waltz', equip = "waltz_set", aoe = false, accession = false }, --Curing Waltz III
+    [193] = { name = "Curing Waltz IV", category = 'track_waltz', equip = "waltz_set", aoe = false, accession = false },  --Curing Waltz IV
+    [311] = { name = "Curing Waltz V", category = 'track_waltz', equip = "waltz_set", aoe = false, accession = false },   --Curing Waltz V
+    [195] = { name = "Divine Waltz", category = 'track_waltz', equip = "waltz_set", aoe = true, accession = false },      --Divine Waltz
+    [262] = { name = "Divine Waltz II", category = 'track_waltz', equip = "waltz_set", aoe = true, accession = false },   --Divine Waltz II
 }
 
-
+--Get the time in milliseconds from socket to provide synchronous time for all clients.
+--Must use socket instead of os.clock() for this purpose
 local function get_time()
     return math.floor(socket.gettime() * 1000)
 end
 
+--Helper function to count the number of items in the top level of a table.
 local function count_keys(tbl)
     local count = 0
     for _ in pairs(tbl) do
@@ -137,47 +134,128 @@ local function count_keys(tbl)
     return count
 end
 
-local function log_echo(message, color_id)
-    windower.add_to_chat(color_id or 204, '[Herald] ' .. message)
+--Log a formatted message to chat in preferred color
+local function log_echo(message)
+    windower.add_to_chat(chat_color, '[Herald] ' .. message)
 end
 
-local function debug(message, color_id)
+--Used for info-toggled display of gear swaps
+local function info_echo(message)
+    if not settings.warn then return end
+    windower.add_to_chat(chat_color, '[Herald] ' .. message)
+end
+
+--Used to display timestamped debug messages when debug mode is on
+local function debug(message)
     if not settings.debug_mode then return end
-    windower.add_to_chat(color_id or 204, "[Herald] [Time: " .. get_time() .. "] DEBUG: " .. message)
+    windower.add_to_chat(chat_color, "[Herald] [Time: " .. get_time() .. "] DEBUG: " .. message)
 end
 
-local function equip_gear(spell_id)
-    local info = spell_info[spell_id]
+
+--Turn a table into a flat string in a GS lua format that can be encoded into HEX for data security.
+--This protects against malicious actors sending you gs c herald_lock_equip updates through
+--text or injection. Hex string decode performed by herald gearswap functions.
+local function tstring(tbl)
+    if type(tbl) == 'number' then
+        return tostring(tbl)
+    elseif type(tbl) ~= 'table' then
+        return string.format("%q", tbl)
+    end
+
+    local result = "{"
+    for k, v in pairs(tbl) do
+        local key
+        if type(k) == "string" and k:match("^[%a_][%w_]*$") then
+            key = k .. "="
+        else
+            key = type(k) == "string" and "[\"" .. k .. "\"]=" or "[" .. k .. "]="
+        end
+        result = result .. key .. tstring(v) .. ","
+    end
+
+    if #result > 1 then
+        result = result:sub(1, -2)
+    end
+    return result .. "}"
+end
+
+--Equip the gear set corresponding to the spell or ability being cast
+local function equip_gear(spell_id, player_name, type)
+    local info = {}
+    if type == "spell" then
+        info = spell_info[spell_id]
+    elseif type == "ability" then
+        info = ability_info[spell_id]
+    end
+
+    --Calculate delta since cast start time in milliseconds
     local elapsed_ms = get_time() - cast_start_time
+
+    --Checks if the spell id exists in the Herald tables before attempting to equip gear
     if info then
-        debug(string.format("Sending Equip Command: %s %s ms after cast start.", info.equip, elapsed_ms))
-        windower.send_command("gs equip " .. info.equip)
+        --Checks that the player has gear_sets_herald.lua sets defined for the incoming spell
+        if gear_sets[player_name] and gear_sets[player_name][info.equip] then
+            info_echo("Equipping spell received set [" .. player_name .. "] [" .. info.equip .. "]")
+            debug(string.format("Sending Equip Command: %s ms after cast start.", elapsed_ms))
+
+            -- Find and initialize a gear set table from gear_sets_herald.lua for encoding.
+            -- Convert the table into a raw Lua code string: "{ waist = 'Gishdubar Sash', ... }"
+            -- Encode the string in HEX to prevent malicious actors from spoofing your gearswap commands.
+            local target_set = gear_sets[player_name][info.equip]
+            local set_string = tstring(target_set)
+            debug("Serialized string is: " .. set_string)
+            local hex_string = set_string:gsub('.', function(c)
+                return string.format('%02x', string.byte(c))
+            end)
+            debug("Hex string is: " .. hex_string)
+
+            --Send the encoded equipment set to gearswap
+            if settings.gear_lock then
+                debug("Sending command gs c herald_lock_equip " .. hex_string)
+                windower.send_command("gs c herald_lock_equip " .. hex_string)
+            else
+                debug("Sending command gs c herald_equip " .. hex_string)
+                windower.send_command("gs c herald_equip " .. hex_string)
+            end
+        else
+            info_echo("Herald gear set [" ..
+                player_name .. "] [" .. info.equip .. "] not found. Customize in herald_gear_sets.lua.")
+        end
     end
 end
 
-local function equip_gear_ability(ability_id)
-    local info = ability_info[ability_id]
-    if info then
-        debug("Sending Equip Command: " ..
-            info.equip .. " " .. (get_time() - cast_start_time) .. " ms after JA start.")
-        windower.send_command("gs equip " .. info.equip)
-    end
-end
-
-local function load_character_settings()
-    settings = config.load(default_settings, 'global')
-    log_echo('Cure/Waltz ' .. (settings.track_cure and "ON" or "OFF") ..
+--Text display of current settings
+local function display_status()
+    log_echo('[Status] Cure ' .. (settings.track_cure and "ON" or "OFF") ..
         ' | Cursna ' .. (settings.track_cursna and "ON" or "OFF") ..
         ' | Phalanx ' .. (settings.track_phalanx and "ON" or "OFF") ..
         ' | Protect ' .. (settings.track_protect_shell and "ON" or "OFF") ..
         ' | Refresh ' .. (settings.track_refresh and "ON" or "OFF") ..
         ' | Regen ' .. (settings.track_regen and "ON" or "OFF") ..
+        ' | Waltz ' .. (settings.track_waltz and "ON" or "OFF") ..
+        '\n[Herald] [Status] Addon Enabled ' .. (settings.addon_enabled and "YES" or "NO") ..
+        ' | Gear Locking ' .. (settings.gear_lock and "ON" or "OFF") ..
         ' | Failsafe ' .. settings.delay .. 's' ..
-        ' | Debug ' .. (settings.debug_mode and "ON" or "OFF"))
+        ' | Debug ' .. (settings.debug_mode and "ON" or "OFF") ..
+        ' | Warn ' .. (settings.warn and "ON" or "OFF"))
 end
 
+--Text display of options for help and load
+local function display_options()
+    log_echo(
+        '[Options] //her cure | cursna | phalanx | protect | refresh | regen | waltz' ..
+        '\n[Herald] [Options] //her on | off | lock | delay <seconds> | warn | debug | help')
+end
+
+--Load settings from data/settings.xml.  Currently saves and loads only to global to prevent mismatched IPC.
+local function load_character_settings()
+    settings = config.load(default_settings, 'global')
+    display_status()
+end
+
+--Used to set random seeds for staggering config.save and config.load
+--Initialize a random seed that's player specific to avoid config save race condition
 local function set_random_seeds()
-    --Initialize a random seed that's player specific to avoid config save race condition
     local player = windower.ffxi.get_player()
     local char_seed = player and player.id or os.time()
 
@@ -185,29 +263,34 @@ local function set_random_seeds()
     math.randomseed(os.time() + math.floor(os.clock() * 1000) + char_seed)
 
     -- Pop a few initial random numbers to flush out early seeding patterns
-    debug("Random 1 " .. math.random())
-    debug("Random 2 " .. math.random())
-    debug("Random 3 " .. math.random())
+    math.random()
+    math.random()
+    math.random()
 end
 
+--Performed at load.  Initialize character settings and display commands.
 windower.register_event('load', function()
-    log_echo('Herald Loaded Successfully and Tracking Enabled', 204)
-    log_echo("Options: //her [help|on|off|debug|cursna|phalanx|regen|protect|delay <seconds>]")
-
+    log_echo('Herald Spell Received Gear System Loaded')
+    display_options()
     --Initialize character specific settings
     load_character_settings()
     set_random_seeds()
 end)
 
+--Performed at character login.  Initialize character settings and display commands.
 windower.register_event('login', function()
+    log_echo('Herald Spell Received Gear System Loaded')
+    display_options()
     --Initialize character specific settings
     load_character_settings()
     set_random_seeds()
-    debug("Character changed. Profile settings reloaded.")
 end)
 
+--Monitors for 0x01A outgoing packets to determine when spell casts and ability casts begin.
+--Determine the target and party members that are within distance for aoe through native -aga
+--and -ra spells, divine waltz, or the use of accession or majesty.
 windower.register_event('outgoing chunk', function(id, data, modified, injected, blocked)
-    if not addon_enabled then return end
+    if not settings.addon_enabled then return end
     --Detect outgoing action packet
     if id == 0x01A then
         debug("Action Initiated")
@@ -363,7 +446,7 @@ end)
 
 --Register when casting is completed, only during a previously registered cast.
 windower.register_event('incoming chunk', function(id, data, modified, injected, blocked)
-    if not addon_enabled then return end
+    if not settings.addon_enabled then return end
     if id == 0x028 then
         local packet = packets.parse('incoming', data)
         local player = windower.ffxi.get_player()
@@ -372,7 +455,7 @@ windower.register_event('incoming chunk', function(id, data, modified, injected,
             local category = packet['Category']
             debug("Player has initiated 0x028 packet of category " .. category)
 
-            -- Spell Cast Completed
+            -- Spell Cast Completed - Send IPC and reset state.
             if category == 4 and outgoing_cast_active then
                 local spell_id = packet['Param']
                 local msg = string.format("HERALD_DONE|%s|%s|%.0f", player.name, spell_id, get_time())
@@ -380,7 +463,7 @@ windower.register_event('incoming chunk', function(id, data, modified, injected,
                 outgoing_cast_active = false
                 debug("Category 4 - Spell cast complete! Broadcasted IPC: " .. msg)
 
-                -- Job Ability Completed
+                -- Job Ability Completed - Send IPC and reset state.
             elseif category == 14 and outgoing_cast_active then
                 local ability_id = packet['Param']
                 local msg = string.format("HERALD_DONE|%s|%s|%.0f", player.name, ability_id, get_time())
@@ -388,7 +471,7 @@ windower.register_event('incoming chunk', function(id, data, modified, injected,
                 outgoing_cast_active = false
                 debug("Category 14 - JA cast complete! Broadcasted IPC: " .. msg)
 
-                -- Spell Cast Interrupted
+                -- Spell Cast Interrupted -- Needs testing. Potentially the wrong category and msg_id.  Ongoing research.
             elseif category == 5 and outgoing_cast_active then
                 debug("Category 5 detected - Spell Interrupted")
                 local msg_id = packet['Param']
@@ -403,10 +486,12 @@ windower.register_event('incoming chunk', function(id, data, modified, injected,
     end
 end)
 
---Receive IPC Messages, send commands to gearswap and set casting state
+--Receive IPC Messages, send commands to gearswap and set casting state.  These commands must be registered in each character's
+--job specific gearswap files, OR in an include that is referenced by the job file.  Mirdain's gearswap system is recommended.
 windower.register_event('ipc message', function(msg)
-    if not addon_enabled then return end
+    if not settings.addon_enabled then return end
 
+    --Sent by caster at the start of spell cast. 0-3ms delay.  Seems to be agnostic of framerates in testing.
     if msg:startswith('HERALD|') then
         local split_msg = msg:split("|")
         local caster_name = split_msg[2]
@@ -422,7 +507,7 @@ windower.register_event('ipc message', function(msg)
         if string.find(target_name, player.name, 1, true) then
             if next(active_incoming_casters) == nil then
                 cast_start_time = time_sent
-                equip_gear(tonumber(spell_id))
+                equip_gear(tonumber(spell_id), player.name, "spell")
             end
 
             -- Add caster to active pool and refresh failsafe timer
@@ -432,6 +517,8 @@ windower.register_event('ipc message', function(msg)
             failsafe_trigger_time = os.clock() + settings.delay
             debug(player.name .. " is targeted by " .. caster_name .. ". Gear equipped and timer refreshed.")
         end
+        --Same as HERALD| for spell casts, but for waltzes.  Duplicated due to spells and abilities having potentially.
+        --overlapping spell/ability id's.
     elseif msg:startswith('HERALD_ABILITY|') then
         local split_msg = msg:split("|")
         local caster_name = split_msg[2]
@@ -445,7 +532,7 @@ windower.register_event('ipc message', function(msg)
         if string.find(target_name, player.name, 1, true) then
             if next(active_incoming_casters) == nil then
                 cast_start_time = time_sent
-                equip_gear_ability(tonumber(ability_id))
+                equip_gear(tonumber(ability_id), player.name, "ability")
             end
 
             active_incoming_casters[caster_name] = true
@@ -454,6 +541,9 @@ windower.register_event('ipc message', function(msg)
             failsafe_trigger_time = os.clock() + settings.delay
             debug(player.name .. " is targeted by " .. caster_name .. ". Gear equipped and timer refreshed.")
         end
+        --Message sent by caster when the spell completion packet is detected.  0-3ms delay, but at the mercy of 400ms ffxi server tick.
+        --Use Packetflow addon to reduce server ticks to 250ms.  Signals receiver to tell gearswap to unlock slots and update gear using
+        --custom herald commands.
     elseif msg:startswith("HERALD_DONE|") or msg:startswith("HERALD_INTERRUPT|") then
         local split_msg = msg:split("|")
         local caster_name = split_msg[2]
@@ -469,10 +559,12 @@ windower.register_event('ipc message', function(msg)
 
             -- If no one is actively casting on us anymore, reset gear
             if next(active_incoming_casters) == nil then
-                windower.send_command(equip_reset_command)
+                windower.send_command('gs c herald_finished')
                 debug("No active incoming casts remain. Resetting gear.")
             end
         end
+        --Signals other clients to reload global settings after making a change.  All characters are synced right now.
+        --Standalone stagger system will replace this and allow for character-specific settings.
     elseif msg:startswith("HERALD_SETTINGS|") then
         debug("IPC Message Received: " .. msg)
 
@@ -486,6 +578,7 @@ windower.register_event('ipc message', function(msg)
     end
 end)
 
+--Logic for commands to toggle and modify settings. //her help
 windower.register_event('addon command', function(cmd, ...)
     local args = { ... }
     if not cmd then return end
@@ -493,14 +586,14 @@ windower.register_event('addon command', function(cmd, ...)
 
     if cmd == 'on' then
         log_echo('Enabled.')
-        addon_enabled = true
+        settings.addon_enabled = true
         outgoing_cast_active = false
         active_incoming_casters = {}
         failsafe_active = false
         failsafe_trigger_time = 0
     elseif cmd == 'off' then
         log_echo('Disabled.')
-        addon_enabled = false
+        settings.addon_enabled = false
         outgoing_cast_active = false
         active_incoming_casters = {}
         failsafe_active = false
@@ -516,6 +609,9 @@ windower.register_event('addon command', function(cmd, ...)
         else
             log_echo('Invalid delay value. Must be >= 1.5. Example: //her delay 1.5')
         end
+    elseif cmd == 'warn' then
+        settings.warn = not settings.warn
+        log_echo('Equipment swap warning is now ' .. tostring(settings.warn))
     elseif cmd == 'protect' then
         settings.track_protect_shell = not settings.track_protect_shell
         log_echo('Protect and Shell tracking is now ' .. tostring(settings.track_protect_shell))
@@ -534,36 +630,48 @@ windower.register_event('addon command', function(cmd, ...)
     elseif cmd == "refresh" then
         settings.track_refresh = not settings.track_refresh
         log_echo('Refresh tracking is now ' .. tostring(settings.track_refresh))
+    elseif cmd == "help" then
+        log_echo([[Herald - //her or //herald Command List:
+[Herald] 1. help - Displays this help menu.
+[Herald] 3. cure : Toggle tracking of cure spells and equipping of cure_set.
+[Herald] 4. cursna : Toggle tracking of cursna spells and equipping of cursna_set.
+[Herald] 5. phalanx : Toggle tracking of phalanx spells and equipping of phalanx_set.
+[Herald] 6. protect : Toggle tracking of protect and shell spells and equipping of protect_shell_set.
+[Herald] 7. refresh : Toggle tracking of refresh spells and equipping of refresh_set.
+[Herald] 8. regen : Toggle tracking of cure spells and equipping of regen_set.
+[Herald] 9. waltz : Toggle tracking of curing and divine waltz abilities and equipping of waltz_set.
+[Herald] 10 on | off: Turn on or off all spell tracking and gear equipping.
+[Herald] 11 lock : Toggle the locking of equipped gearsets during incoming spell cast to disallow overwriting.
+[Herald] 12. warn : Toggle simple notifications when a gear set has been eqiupped or is not set up for the character.
+[Herald] 13. delay <seconds> : Sets the failsafe equipment reset delay. Default 3s, minimum 1.5s.
+[Herald] 14. debug : Toggles verbose debug mode with extensive timestamped monitoring of spell tracking.]])
     else
-        log_echo(
-            "Unknown command. Options: //herald //her [help|on|off|debug|cure|cursna|phalanx|regen|refresh|protect|delay <seconds>]")
+        log_echo("Unknown command.")
+        display_options()
         return
     end
 
-    local save_delay = math.random() * 2 + 0.5
-    coroutine.schedule(function()
-        config.save(settings, 'global')
-        debug("Settings saved to disk after " .. string.format("%.2f", save_delay) .. "s delay.")
-        log_echo('Tracked Spells: Cure/Waltz ' .. (settings.track_cure and "ON" or "OFF") .. ' | Cursna ' ..
-            (settings.track_cursna and "ON" or "OFF") ..
-            ' | Phalanx ' ..
-            (settings.track_phalanx and "ON" or "OFF") ..
-            ' | Regen ' ..
-            (settings.track_regen and "ON" or "OFF") .. ' | Protect ' .. (settings.track_protect_shell and "ON" or "OFF"))
-        log_echo("Failsafe equipment reversion delay is " ..
-            tostring(settings.delay) .. "s and debug mode is " .. (settings.debug_mode and "ON" or "OFF"))
-        windower.send_ipc_message("HERALD_SETTINGS|Save|All")
-    end, save_delay)
+    if cmd ~= "help" then
+        local save_delay = math.random() * 2 + 0.5
+        coroutine.schedule(function()
+            config.save(settings, 'global')
+            debug("Settings saved to disk after " .. string.format("%.2f", save_delay) .. "s delay.")
+            windower.send_ipc_message("HERALD_SETTINGS|Load|All")
+            display_status()
+        end, save_delay)
+    end
 end)
 
+--Failsafe fallback will trigger at the <delay> amount of seconds since cast was initially detected.  Default is 3s.
+--Sends equipment reset command to ensure that packet drops, errors and latency do not cause indefinite equipment locks.
 windower.register_event('prerender', function()
-    if not addon_enabled or not failsafe_active then return end
+    if not settings.addon_enabled or not failsafe_active then return end
 
     if os.clock() >= failsafe_trigger_time then
         failsafe_active = false
         failsafe_trigger_time = 0
         active_incoming_casters = {}
-        windower.send_command(equip_reset_command)
+        windower.send_command('gs c herald_finished')
         debug("Failsafe triggered! Sending equipment reset command.")
     end
 end)

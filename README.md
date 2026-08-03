@@ -8,8 +8,8 @@ When managing multiple characters simultaneously, manually swapping specialized 
 **Herald** resolves this by listening directly to network chunk payloads across your multibox instances to provide alerts to the main and all eligible aoe targets within 0 to 3 ms from the start of cast:
 1. **Detection:** Intercepts outgoing action packets (`0x01A`) from a casting character to identify tracked spells or waltzes.
 2. **AoE Calculations:** Evaluates active stratagems/buffs (**Accession** or **Majesty**) and runs a live 3D Euclidean distance vector check (within 10 yalms) to cleanly map all affected party members.
-3. **IPC Broadcast:** Instantly fires data strings over Inter-Process Communication (IPC) to notify receiving characters.
-4. **Automation:** The receiving character swaps into target equipment, monitors incoming server action notifications (`0x028`), and updates back to their standard layout (`gs c update auto`) exactly when casting completes, is interrupted, or hits a customizable frame-rendered failsafe timer.
+3. **IPC Broadcast:** Instantly fires data strings over Inter-Process Communication (IPC) to notify receiving characters.  Strings are encoded to prevent malicious injection from other players.
+4. **Automation:** The receiving character swaps into target equipment, monitors incoming server action notifications (`0x028`), and updates back to their standard layout (`gs c update auto`) exactly when casting completes, is interrupted, or hits a customizable frame-rendered failsafe timer. Use herald_gear_sets.lua to set up your character-specific sets.  Herald does not use your characters's sets defined in gearswap, but does use custom commands.  See setup instructions. Optionally, lock gear in place while cast is incoming to prevent overwriting your gear due to combat actions.
 
 ---
 
@@ -20,34 +20,34 @@ When managing multiple characters simultaneously, manually swapping specialized 
   * **Cures & Waltzes:** All tiers of Cure, Curaga, Cura, Curing Waltz, and Divine Waltz.
   * **Enhancing Magic:** Phalanx I/II, Regen I–V, Refresh I-III, Protect I–V, Shell I–V, Protectra I–V, and Shellra I–V.
   * **Status Removal:** Cursna.
-* **Frame-Rendered Failsafe** — Utilizes a `prerender` event loop to guarantee equipment updates restore cleanly if an unexpected connection or status exception drops a packet handler.
+* **Frame-Rendered Failsafe** — Utilizes a frame-timed event loop to guarantee equipment updates restore cleanly if an unexpected connection or status exception drops a packet handler.
 
 ---
 
 ## Gearswap Customization
-By default, Herald triggers targeted equipment macros directly inside your active Gearswap profiles. Mirdain ecosystem uses "gs c update auto", while Selendriles uses "gs c update" for the equipment reset command. Ensure the variables at the top of your `Herald.lua` file map properly to your layout:
-
-```lua
-local cure_set = "sets.Cure_Received"
-local cursna_set = "sets.Cursna_Received"
-local phalanx_set = "sets.Phalanx_Received"
-local protect_shell_set = "sets.Protect_Shell_Received"
-local refresh_set = "sets.Refresh_Received"
-local regen_set = "sets.Regen_Received"
-local equip_reset_command = "gs c update auto"
-```
+By default, Herald triggers gearswap to equip sets configured in herald_gear_sets.lua. This requires custom commands in your gearswap include or job-specific gearswap file. The modified Mirdain-Include.lua that is packaged with this addon is a direct plug and play replacement for Mirdain gearswap ecosystem.  It is recommended to not use Selendriles with this addon, as Selendrile gearswap utilizes delayed action packets to perform gear swaps 600-1000ms after cast time, causing your character to equip their set after the spell has landed in most cases.  See Installation below for custom setups outside of Mirdain gearswap ecosystem.
 
 ---
 
-## Installation
+## Installation for Mirdain Gearswap Users
 1. Download the repository source files.
 2. Navigate to your `Windower4/addons/` directory and create a new folder named `Herald`.
-3. Drop the `Herald.lua` script inside that folder.
-4. Open your game client and load the addon via the chat console:  
-   `//lua load herald`
-5. Add or modify your existing gearswap buff and cure received sets, or use the default set names listed above.
-6. Change the equip_reset_command variable to match the command your gearswap uses to trigger choosing a set.  This software was designed to work with gs c apdate auto, which is standard for Mirdain's ecosystem, but can be adapted to any.
+3. Drop the `Herald.lua` and `herald_gear_sets.lua` script inside that folder.
+4. Open `herald_gear_sets.lua` in your preferred text editor or IDE and create your custom sets for each character.  All spell received increasing gear is listed at the bottom of the file for your convenience.
+5. Navigate to your `Windower4/addons/GearSwap/data` directory and copy/paste the `Mirdain-Include.lua` file.
+6. Open your game client and load the addon via the chat console `//lua load herald`
+7. Reload your gearswap using the chat console `//lua reload gearswap` 
+8. Use `//her help` to see the available commands to turn on and off spell groups, modify failsafe delay and enable or disable locking of gear, warnings and ebug mode. 
 
+## Installation for other Gearswap Users
+1. Download the repository source files.
+2. Navigate to your `Windower4/addons/` directory and create a new folder named `Herald`.
+3. Drop the `Herald.lua` and `herald_gear_sets.lua` script inside that folder.
+4. Open `herald_gear_sets.lua` in your preferred text editor or IDE and create your custom sets for each character.  All spell received increasing gear is listed at the bottom of the file for your convenience.
+5. Navigate to your `Windower4/addons/GearSwap/data` directory open `Herald_Gearswap_Commands` file. Copy/Paste the active_external_locks = {} toward the top of your job-specific gearswap file and copy/paste the function self_command(cmd) section into your existing self_command function, or copy/paste the whole function if none exists in your current gs.
+6. Open your game client and load the addon via the chat console `//lua load herald`
+7. Reload your gearswap using the chat console `//lua reload gearswap` 
+8. Use `//her help` to see the available commands to turn on and off spell groups, modify failsafe delay and enable or disable locking of gear, warnings and ebug mode. 
 ---
 
 ## Commands
@@ -59,12 +59,15 @@ The addon recognizes both `//herald` and `//her` command aliases.
 | :--- | :--- |
 | `//herald on` | Enables global packet monitoring and gear state handling. |
 | `//herald off` | Disables the addon completely. |
+| `//herald lock` | Toggles locking of spell equipment into Herald sets during incoming tracked spells and abilities. |
+| `//herald warn` | Toggles chat log warnings for when gear is equipped or sets are not configured for tracked incoming spells and abilities. |
 | `//herald cure` | Toggles tracking for incoming Cures and Waltzes. |
 | `//herald cursna` | Toggles tracking for incoming Cursna casts. |
 | `//herald phalanx` | Toggles tracking for incoming Phalanx I & II spells. |
 | `//herald protect` | Toggles tracking for incoming Protect, Shell, Protectra, and Shellra spells. |
 | `//herald refresh` | Toggles tracking for incoming Refresh spells. |
 | `//herald regen` | Toggles tracking for incoming Regen spells. |
+| `//herald waltz` | Toggles tracking for incoming Curing and Divine Waltz abilities. |
 | `//herald delay <seconds>` | Adjusts the frame-rendered failsafe reset threshold (Must be $\ge$ 1.5 seconds). |
 | `//herald debug` | Toggles deep developer timestamp logs inside the chat screen. |
 
