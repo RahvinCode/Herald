@@ -151,6 +151,33 @@ local function debug(message)
     windower.add_to_chat(chat_color, "[Herald] [Time: " .. get_time() .. "] DEBUG: " .. message)
 end
 
+local function validate_table(tbl, resource_table)
+    for id, data in pairs(tbl) do
+        if data.name == resource_table[id].en then
+            debug("Validated Herald ID " ..
+                id ..
+                ": " ..
+                data.name .. " matches Windower resource ID " .. resource_table[id].id .. ": " .. resource_table[id].en)
+        else
+            log_echo("Spell/Ability ID " ..
+                id .. " for " .. data.name .. " does not match resource table.  Searching for correct ID")
+            for resource_id, resource_data in pairs(resource_table) do
+                if data.name == resource_data.en then
+                    tbl[resource_id] = data
+                    tbl[id] = nil
+                    log_echo("Table ID " ..
+                        resource_id ..
+                        " in resource table matches " ..
+                        data.name .. ".  Adding to spell table and removing invalid entry.")
+                    if tbl[id] then
+                        log_echo("ID removal unsuccessful for " .. id ": " .. data.name)
+                    end
+                    break
+                end
+            end
+        end
+    end
+end
 
 --Turn a table into a flat string in a GS lua format that can be encoded into HEX for data security.
 --This protects against malicious actors sending you gs c herald_lock_equip updates through
@@ -180,7 +207,8 @@ local function tstring(tbl)
 end
 
 --Equip the gear set corresponding to the spell or ability being cast
-local function equip_gear(spell_id, player_name, type)
+local function equip_gear(spell_id, player_name, player_job, type)
+    debug("Equip gear function triggered: " .. spell_id .. ", " .. player_name .. ", " .. player_job .. ", " .. type)
     local info = {}
     if type == "spell" then
         info = spell_info[spell_id]
@@ -195,27 +223,40 @@ local function equip_gear(spell_id, player_name, type)
     if info then
         --Checks that the player has gear_sets_herald.lua sets defined for the incoming spell
         if gear_sets[player_name] and gear_sets[player_name][info.equip] then
-            info_echo("Equipping spell received set [" .. player_name .. "] [" .. info.equip .. "]")
-            debug(string.format("Sending Equip Command: %s ms after cast start.", elapsed_ms))
+            local target_set = {}
+            if gear_sets[player_name][info.equip][player_job] and next(gear_sets[player_name][info.equip][player_job]) ~= nil then
+                info_echo("Equipping spell received set [" ..
+                    player_name .. "] [" .. info.equip .. "] [" .. player_job .. "]")
+                target_set = gear_sets[player_name][info.equip][player_job]
+            elseif gear_sets[player_name][info.equip]["all_jobs"] and next(gear_sets[player_name][info.equip]["all_jobs"]) ~= nil then
+                info_echo("Equipping spell received set [" .. player_name .. "] [" .. info.equip .. "] [all_jobs]")
+                target_set = gear_sets[player_name][info.equip]["all_jobs"]
+            else
+                info_echo("Herald gear set [" ..
+                    player_name ..
+                    "] [" ..
+                    info.equip ..
+                    "] [all_jobs]/[" .. player_job .. "] not found or are empty. Customize in herald_gear_sets.lua.")
+            end
 
             -- Find and initialize a gear set table from gear_sets_herald.lua for encoding.
             -- Convert the table into a raw Lua code string: "{ waist = 'Gishdubar Sash', ... }"
             -- Encode the string in HEX to prevent malicious actors from spoofing your gearswap commands.
-            local target_set = gear_sets[player_name][info.equip]
             local set_string = tstring(target_set)
-            debug("Serialized string is: " .. set_string)
             local hex_string = set_string:gsub('.', function(c)
                 return string.format('%02x', string.byte(c))
             end)
+            debug(string.format("Sending Equip Command: %s ms after cast start.", elapsed_ms))
+            debug("Serialized string is: " .. set_string)
             debug("Hex string is: " .. hex_string)
 
             --Send the encoded equipment set to gearswap
             if settings.gear_lock then
-                debug("Sending command gs c herald_lock_equip " .. hex_string)
                 windower.send_command("gs c herald_lock_equip " .. hex_string)
+                debug("Sending command gs c herald_lock_equip " .. hex_string)
             else
-                debug("Sending command gs c herald_equip " .. hex_string)
                 windower.send_command("gs c herald_equip " .. hex_string)
+                debug("Sending command gs c herald_equip " .. hex_string)
             end
         else
             info_echo("Herald gear set [" ..
@@ -268,22 +309,25 @@ local function set_random_seeds()
     math.random()
 end
 
---Performed at load.  Initialize character settings and display commands.
-windower.register_event('load', function()
-    log_echo('Herald Spell Received Gear System Loaded')
-    display_options()
-    --Initialize character specific settings
+local function initialize()
+    --Initialize settings
     load_character_settings()
     set_random_seeds()
+    display_options()
+    --Validate that spells and abilities correspond correctly to resource tables and replace ids automatically
+    validate_table(spell_info, res.spells)
+    validate_table(ability_info, res.job_abilities)
+    log_echo('Herald spell received gear system loaded. Spell and ability tables validated.')
+end
+
+--Performed at load.  Initialize character settings and display commands.
+windower.register_event('load', function()
+    initialize()
 end)
 
 --Performed at character login.  Initialize character settings and display commands.
 windower.register_event('login', function()
-    log_echo('Herald Spell Received Gear System Loaded')
-    display_options()
-    --Initialize character specific settings
-    load_character_settings()
-    set_random_seeds()
+    initialize()
 end)
 
 --Monitors for 0x01A outgoing packets to determine when spell casts and ability casts begin.
@@ -507,7 +551,7 @@ windower.register_event('ipc message', function(msg)
         if string.find(target_name, player.name, 1, true) then
             if next(active_incoming_casters) == nil then
                 cast_start_time = time_sent
-                equip_gear(tonumber(spell_id), player.name, "spell")
+                equip_gear(tonumber(spell_id), player.name, player.main_job:lower(), "spell")
             end
 
             -- Add caster to active pool and refresh failsafe timer
@@ -532,7 +576,7 @@ windower.register_event('ipc message', function(msg)
         if string.find(target_name, player.name, 1, true) then
             if next(active_incoming_casters) == nil then
                 cast_start_time = time_sent
-                equip_gear(tonumber(ability_id), player.name, "ability")
+                equip_gear(tonumber(ability_id), player.name, player.main_job:lower(), "ability")
             end
 
             active_incoming_casters[caster_name] = true
