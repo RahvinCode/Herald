@@ -1,6 +1,8 @@
 # Herald
 
-An open-source Final Fantasy XI Windower addon designed for multiboxers to track spellcasts and job abilities across locally connected game sessions, instantly swapping characters into specialized "received-buff" gear sets.
+# Update 8/13/26 - For Mirdain gearswap users, or those looking for an enhanced gearswap that is optimized for multiboxing, see the my gearswap repository for Herald and more integrated directly into a single gearswap include.  It uses your job files without external addon-specific gear files or intricate setup.  If you're still on Kinematics or Selendrile and you're multiboxing, this is for you.  If you just want the Herald addon, it works great.  Enjoy.
+
+Herald is an open-source Final Fantasy XI Windower addon designed for multiboxers to track spellcasts and job abilities across locally connected game sessions, instantly swapping characters into specialized "received-buff" gear sets.
 
 ## Overview
 When managing multiple characters simultaneously, manually swapping specialized equipment to receive optimization bonuses (such as `sets.Phalanx_Received` or `sets.Cursna_Received`) is impractical. Addons such as React and gearswap systems such as Selendrile's rely on deprecated action packets that take 600 ms or more to register that a cast has started.  With moderate fast cast, this means that your character will be equipping gear after the spell lands, making the swap pointless.
